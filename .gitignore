@@ -1,0 +1,12 @@
+.venv/
+.venv-wsl/
+.env
+.env.*
+!.env.example
+__pycache__/
+*.pyc
+runs/
+weights/*.pt
+third_party/
+data/*
+!data/.gitkeep
