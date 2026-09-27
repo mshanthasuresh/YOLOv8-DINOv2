@@ -1,0 +1,7 @@
+# Replace these values for your own dataset.
+path: ../data/custom
+train: images/train
+val: images/val
+
+names:
+  0: object

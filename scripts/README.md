@@ -1,0 +1,1 @@
+Run scripts from the project root after activating `.venv`. `setup_ultralytics.py` installs the editable Ultralytics source required by the custom modules. `download_dataset.py` prepares COCO8 through Ultralytics. `train.py` trains either the custom DINOv2 model or a standard YOLO baseline.
