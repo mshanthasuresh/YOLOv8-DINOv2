@@ -252,8 +252,9 @@ The recorded baseline/fusion results and the prioritized follow-up experiments
 are in `EXPERIMENT_RESULTS_AND_IMPROVEMENT_PLAN.md`.
 
 For a self-contained Kaggle or Google Colab run on Pascal VOC, open
-`YOLOv8_DINOv2_VOC_Kaggle_Colab.ipynb`. It explains the fusion changes, runs
-shape/gradient checks, performs a short smoke test, and then provides matched
-baseline/fusion training and evaluation cells. The full VOC download is about
-2.8 GB. The notebook's optional Git section requires setting `REPO_URL`; its
-token is prompted at runtime and is not stored in the notebook.
+`YOLOv8_DINOv2_VOC_Kaggle_Colab.ipynb`. It explains the fusion changes, checks
+the model shapes and adapter gradients, then proceeds directly to matched
+baseline/fusion training and evaluation without a smoke-training run. The full
+VOC download is about 2.8 GB. The notebook's optional Git section requires
+setting `REPO_URL`; its token is prompted at runtime and is not stored in the
+notebook.
