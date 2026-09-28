@@ -258,3 +258,7 @@ baseline/fusion training and evaluation without a smoke-training run. The full
 VOC download is about 2.8 GB. The notebook's optional Git section requires
 setting `REPO_URL`; its token is prompted at runtime and is not stored in the
 notebook.
+
+For a presentation-ready explanation of the architecture, code, weight
+transfer, challenges, and likely questions, see
+`IMPLEMENTATION_EXPLANATION_FOR_PRESENTATION.md`.
