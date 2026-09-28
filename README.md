@@ -262,3 +262,7 @@ notebook.
 For a presentation-ready explanation of the architecture, code, weight
 transfer, challenges, and likely questions, see
 `IMPLEMENTATION_EXPLANATION_FOR_PRESENTATION.md`.
+
+For a beginner-level explanation of the deep-learning concepts, full tensor
+flow, code walkthrough, presentation script, and viva questions, see
+`PRESENTATION_CONCEPTS_AND_VIVA_GUIDE.md`.

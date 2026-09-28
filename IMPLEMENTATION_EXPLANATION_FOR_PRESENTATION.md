@@ -10,14 +10,50 @@ This is a hypothesis, not a guaranteed improvement. The result must be based on 
 
 YOLO builds spatial feature maps at several resolutions and predicts boxes at three scales. DINOv2 ViT-S/14 turns an RGB image into a 384-dimensional global class-token embedding. The implementation projects that vector into three channels and broadcasts those channels over YOLO's deepest spatial grid. YOLO then concatenates this context map with its deep feature map and sends the combined feature through the usual detection neck/head.
 
-```text
-RGB image
-  |-------------------------------> YOLOv8n backbone -> spatial feature maps ---+
-  |                                                                             |
-  +-> ConvDummy bypass -> frozen DINOv2 -> 384-d global embedding               |
-                                   -> trainable 1x1 projection -> context map --+
-                                                        -> concatenate -> YOLO neck/head -> detections
+```mermaid
+flowchart LR
+  IMG[RGB input image<br/>B x 3 x H x W]
+
+  subgraph YOLO[YOLOv8n detection path]
+    YBACK[YOLOv8n backbone]
+    YFEAT[Deep spatial feature<br/>B x C x H/32 x W/32]
+    NECK[YOLO neck and<br/>three-scale detection head]
+    DET[Boxes, classes,<br/>confidence scores]
+    YBACK --> YFEAT
+    NECK --> DET
+  end
+
+  subgraph DINO[DINOv2 global-context path]
+    BYPASS[ConvDummy<br/>raw-image bypass]
+    ENC[Frozen DINOv2 ViT-S/14<br/>no gradients]
+    EMB[Global embedding<br/>B x 384]
+    PROJ[Trainable 1 x 1 projector<br/>384 channels to 3]
+    CTX[Resize and broadcast<br/>B x 3 x H/32 x W/32]
+    BYPASS --> ENC --> EMB --> PROJ --> CTX
+  end
+
+  IMG --> YBACK
+  IMG --> BYPASS
+  YFEAT --> FUSE{Channel-wise concatenate}
+  CTX --> FUSE
+  FUSE --> NECK
+
+  classDef input fill:#e8f1ff,stroke:#2864a5,stroke-width:2px,color:#102a43
+  classDef frozen fill:#e9f7ef,stroke:#23834b,stroke-width:2px,color:#123c24
+  classDef trainable fill:#fff3d6,stroke:#c47a00,stroke-width:2px,color:#513400
+  classDef fusion fill:#ffe4e1,stroke:#bd3d34,stroke-width:3px,color:#541a16
+  classDef output fill:#edf0f4,stroke:#4c5866,stroke-width:2px,color:#1b2733
+  class IMG input
+  class BYPASS,ENC,EMB frozen
+  class PROJ,CTX trainable
+  class FUSE fusion
+  class DET output
 ```
+
+**How to read it:** the same RGB image enters both branches. YOLO preserves
+spatial detail for localization; frozen DINOv2 summarizes the whole image.
+The trainable projector turns that global summary into a small context map,
+which is concatenated with YOLO's deepest spatial feature before detection.
 
 At a 640 x 640 input, the stride-32 feature grid is 20 x 20, so the projected DINO context has shape `(batch, 3, 20, 20)`. At a 320 x 320 input it is `(batch, 3, 10, 10)`. The actual VOC experiment configures 640 x 640.
 
