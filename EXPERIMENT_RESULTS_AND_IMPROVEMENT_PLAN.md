@@ -4,16 +4,27 @@ Date recorded: 2026-09-27
 
 ## Summary
 
-The recorded COCO8 experiment used a zero-initialized DINO projector. Its trained fused checkpoint kept zero projection weights/bias and scored zero on validation. That is a failed run, not evidence that DINOv2 improves detection. Since that run, the source has been updated to use ImageNet normalization, a small nonzero projector/context initialization, and adapter-norm logging. Those newer source changes have passed model-forward and one-step gradient/update checks, but have not yet been trained on a dataset.
+The earlier COCO8 experiment used a zero-initialized DINO projector and failed: the trained fused checkpoint kept zero projection weights/bias and scored zero on validation. The source was then updated to use ImageNet normalization, a small nonzero projector/context initialization, and adapter-norm logging. A larger Pascal VOC experiment was run on Kaggle with a GPU. The fused model trained and its adapter norms changed during training, but the fusion model scored **lower** than the baseline on all four metrics. DINOv2 did not improve detection in this experiment.
 
-## Matched Results
+## VOC Results (Kaggle, 2026-09-29)
+
+Both models used the same Pascal VOC data, 640px images, batch size 2, 10 epochs, AdamW optimizer, learning rate 0.001, FP32, seed 42, and VOC2007 test images as the validation holdout. The DINO adapter was observed changing during training (epoch 4: weight_norm=1.08746, bias_norm=2.62007; epoch 9: weight_norm=1.23016, bias_norm=2.63433).
+
+| Model | Precision | Recall | mAP50 | mAP50-95 | Inference ms/img |
+|---|---:|---:|---:|---:|---:|
+| YOLOv8n baseline | 0.6768 | 0.6427 | 0.6852 | 0.4768 | 2.68 |
+| YOLOv8n + DINOv2 fusion | 0.4617 | 0.3911 | 0.3691 | 0.2182 | 36.88 |
+
+The fusion model is worse than the baseline on every metric and 13.8x slower per image. The adapter learned nonzero parameters, but the added global-context pathway did not help detection and may have interfered with the pretrained detector. Full output artifacts will be available for download once Kaggle finalizes the run.
+
+## Earlier COCO8 Results (Failed Run — Kept for Provenance)
 
 Both fine-tuned runs used COCO8, the same four training images and four validation images, 10 epochs, image size 320 for training, batch size 4, GPU 0, full-precision training, and image size 640 for final validation.
 
 | Model | Precision | Recall | mAP50 | mAP50-95 |
 |---|---:|---:|---:|---:|
 | Fine-tuned YOLOv8n baseline | 0.6012 | 0.9023 | 0.8873 | 0.6253 |
-| Fine-tuned YOLOv8n + DINOv2 | 0.0000 | 0.0000 | 0.0000 | 0.0000 |
+| Earlier YOLOv8n + DINOv2 (zero-init, failed) | 0.0000 | 0.0000 | 0.0000 | 0.0000 |
 
 The baseline is in `runs/baseline_fp32_same_split_640/metrics.json`; its checkpoint is `runs/baseline_yolov8-2/weights/best.pt`. The fused metrics are in `runs/fused_metrics_fp32/metrics.json`; its checkpoint is `runs/fused_yolov8-3/weights/best.pt`. Per-epoch training metrics are in `runs/baseline_yolov8-2/results.csv` and `runs/fused_yolov8-3/results.csv`.
 

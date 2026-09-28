@@ -230,20 +230,20 @@ Use the same validation data, resolution, and metric implementation for both mod
 
 ## 11. Challenges and Honest Status
 
-### Earlier failure
+### VOC experiment result
 
-The earlier COCO8 fused run used a zero-initialized DINO projector and a different normalization. Its trained projector stayed zero and the model scored zero on the four-image validation set. This was a failed experiment, not evidence that DINO improves detection. We did not prove a single definitive root cause.
+The revised fusion model was trained on Pascal VOC on a Kaggle GPU. The DINO adapter changed during training (epoch 4: weight_norm=1.08746; epoch 9: weight_norm=1.23016), so the projector was not stuck at zero. However, the fusion model scored **lower** than the baseline on all four metrics and was 13.8x slower per image:
 
-### What changed for the VOC experiment
+| Model | Precision | Recall | mAP50 | mAP50-95 | Inference ms/img |
+|---|---:|---:|---:|---:|---:|
+| YOLOv8n baseline | 0.6768 | 0.6427 | 0.6852 | 0.4768 | 2.68 |
+| YOLOv8n + DINOv2 fusion | 0.4617 | 0.3911 | 0.3691 | 0.2182 | 36.88 |
 
-- ImageNet normalization for the pretrained DINO encoder.
-- Small nonzero projector and added-channel initialization.
-- A one-batch detection-loss gradient/update check before the full run.
-- Per-epoch adapter-norm logging.
-- A larger and matched Pascal VOC comparison.
-- No separate smoke-training stage, per your request.
+DINOv2 did **not** improve detection in this experiment. Possible reasons include the global token being broadcast uniformly without spatial detail, the added pathway disrupting pretrained YOLO features, insufficient training, or the 1x1 projection being too weak. The result is an honest negative finding, not a fail to hide.
 
-The latest Kaggle check reported the notebook as `RUNNING`; final VOC metrics are pending. Do not quote the old COCO8 table as the new VOC result. Once the Kaggle run completes, use the actual `voc_comparison.csv`/`.json`, and state clearly whether the projector norm changed.
+### Earlier COCO8 failure (for provenance only)
+
+The earlier COCO8 fused run used a zero-initialized DINO projector and scored zero. That was a separate failed experiment with different code. Its numbers must not be confused with the VOC result above.
 
 ## 12. Ready-to-Say Presentation
 
@@ -303,7 +303,7 @@ The supplied Ultralytics config lists VOC2007 test images as `val`, so in this n
 
 ### "What are your results?"
 
-At the time this guide was written, the Kaggle notebook was still running. I should say the VOC result is pending and update this answer from the exported comparison metrics when it finishes. The old COCO8 results belong to a previous implementation and must be labelled separately.
+On Pascal VOC, the YOLOv8n baseline scored precision 0.6768, recall 0.6427, mAP50 0.6852, and mAP50-95 0.4768. The fused YOLOv8n + DINOv2 model scored precision 0.4617, recall 0.3911, mAP50 0.3691, and mAP50-95 0.2182. The fusion model was also 13.8 times slower per image. DINOv2 did not improve detection; it hurt performance. The DINO adapter did learn nonzero weights, so the issue is not a disconnected gradient path but that the global-context pathway did not help the detector and may have interfered with it.
 
 ### "What are the main limitations?"
 
@@ -317,7 +317,8 @@ The DINO input is a global token broadcast spatially, so it does not provide DIN
 - Know exactly what is frozen (DINO encoder) and trainable (projector and YOLO detector).
 - Explain why pretrained weights need index remapping and why two C2f inputs need three added channels.
 - Explain precision, recall, IoU, mAP50, and mAP50-95 in one sentence each.
-- State the old COCO8 failure honestly and do not present it as a DINO improvement.
+- State the COCO8 failure honestly and do not present it as a DINO improvement.
+- State the VOC result honestly: DINOv2 did not improve detection. The adapter learned but performance dropped.
 - Check Kaggle's final run status and actual comparison file before quoting VOC metrics.
 
 ## 15. Source Files

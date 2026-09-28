@@ -149,16 +149,16 @@ The earlier COCO8 fusion run used a zero-initialized DINO projector. The trained
 - Keep full precision for both models for a controlled comparison.
 - Remove the separate smoke-training run; proceed from the one-batch check to the full matched comparison.
 
-## 7. Current Run Status and Result Honesty
+## 7. VOC Results (Kaggle, 2026-09-29)
 
-The recorded old COCO8 result belongs to the earlier zero-initialized implementation:
+The revised fusion model was trained on Pascal VOC. Its DINO adapter changed during training (epoch 4: weight_norm=1.08746; epoch 9: weight_norm=1.23016), confirming the projector was not stuck at zero. However, the fusion model scored **lower** than the baseline on every metric and was significantly slower:
 
-| Earlier COCO8 run | Precision | Recall | mAP50 | mAP50-95 |
-|---|---:|---:|---:|---:|
-| Fine-tuned YOLOv8n baseline | 0.6012 | 0.9023 | 0.8873 | 0.6253 |
-| Earlier YOLOv8n + DINOv2 run | 0.0000 | 0.0000 | 0.0000 | 0.0000 |
+| Model | Precision | Recall | mAP50 | mAP50-95 | Inference ms/img |
+|---|---:|---:|---:|---:|---:|
+| YOLOv8n baseline | 0.6768 | 0.6427 | 0.6852 | 0.4768 | 2.68 |
+| YOLOv8n + DINOv2 fusion | 0.4617 | 0.3911 | 0.3691 | 0.2182 | 36.88 |
 
-Do not attribute these old values to the revised VOC code. The revised VOC experiment was submitted to Kaggle as a private GPU notebook. Its current status was still RUNNING the last time it was checked; the final VOC metrics are therefore pending. Once it finishes, insert its actual comparison table here. Never claim DINOv2 improved detection unless the measured comparison supports that claim.
+DINOv2 did **not** improve detection in this experiment. The global-context pathway may have interfered with the pretrained detector instead of helping it. Earlier COCO8 results (zero-initialized, failed) are kept in `EXPERIMENT_RESULTS_AND_IMPROVEMENT_PLAN.md` for provenance only.
 
 ## 8. Short Presentation Script
 
@@ -166,7 +166,7 @@ Do not attribute these old values to the revised VOC code. The revised VOC exper
 >
 > I retained the pretrained YOLO weights wherever the tensor shapes matched. Because two C2f layers gained three input channels, I inserted small weights for only those new channels and copied the old filters into their corresponding positions. DINO itself is frozen; the projection and YOLO detector are trainable. I checked the graph shapes and verified that the detection loss gives the projector a gradient and that an optimizer step changes it.
 >
-> I compare a standard YOLOv8n baseline and the fused model on the same Pascal VOC training and holdout split with matched settings. The first small COCO8 fusion attempt failed, so I report it as a failed earlier experiment, not as an improvement. The larger VOC run is the experiment that will determine whether the revised fusion helps.
+> I compare a standard YOLOv8n baseline and the fused model on the same Pascal VOC training and holdout split with matched settings. The first COCO8 attempt failed with a zero-initialized projector. The revised VOC run trained successfully and the adapter learned nonzero weights, but the fusion model scored lower than the baseline on every metric and was 13.8 times slower. The global DINO context did not help detection in this experiment.
 
 ## 9. Likely Questions and Answers
 
