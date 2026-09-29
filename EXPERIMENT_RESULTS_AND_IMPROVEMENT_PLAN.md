@@ -1,21 +1,56 @@
 # YOLOv8 + DINOv2 Experiment Results and Improvement Plan
 
-Date recorded: 2026-09-27
+Date updated: 2026-09-29
 
 ## Summary
 
-The earlier COCO8 experiment used a zero-initialized DINO projector and failed: the trained fused checkpoint kept zero projection weights/bias and scored zero on validation. The source was then updated to use ImageNet normalization, a small nonzero projector/context initialization, and adapter-norm logging. A larger Pascal VOC experiment was run on Kaggle with a GPU. The fused model trained and its adapter norms changed during training, but the fusion model scored **lower** than the baseline on all four metrics. DINOv2 did not improve detection in this experiment.
-
-## VOC Results (Kaggle, 2026-09-29)
-
-Both models used the same Pascal VOC data, 640px images, batch size 2, 10 epochs, AdamW optimizer, learning rate 0.001, FP32, seed 42, and VOC2007 test images as the validation holdout. The DINO adapter was observed changing during training (epoch 4: weight_norm=1.08746, bias_norm=2.62007; epoch 9: weight_norm=1.23016, bias_norm=2.63433).
+This project tested two versions of YOLOv8n + DINOv2 fusion on Pascal VOC. **V2** (spatial patch tokens, 64-channel projection, gated fusion) **outperformed both the YOLOv8n baseline and the V1 fusion** across all four metrics.
 
 | Model | Precision | Recall | mAP50 | mAP50-95 | Inference ms/img |
 |---|---:|---:|---:|---:|---:|
 | YOLOv8n baseline | 0.6768 | 0.6427 | 0.6852 | 0.4768 | 2.68 |
-| YOLOv8n + DINOv2 fusion | 0.4617 | 0.3911 | 0.3691 | 0.2182 | 36.88 |
+| YOLOv8n + DINOv2 v1 (global token, 3ch) | 0.4617 | 0.3911 | 0.3691 | 0.2182 | 36.88 |
+| **YOLOv8n + DINOv2 v2 (patch tokens, 64ch, gated)** | **0.7810** | **0.7505** | **0.8213** | **0.5522** | 34.77 |
 
-The fusion model is worse than the baseline on every metric and 13.8x slower per image. The adapter learned nonzero parameters, but the added global-context pathway did not help detection and may have interfered with the pretrained detector. Full output artifacts will be available for download once Kaggle finalizes the run.
+V2 improved mAP50 by +13.6% (0.685→0.821) and mAP50-95 by +7.5% (0.477→0.552) over the baseline. The key improvement was replacing the single global class token (V1) with spatially varying patch tokens (V2), giving the detector location-specific DINO features instead of a uniform broadcast.
+
+---
+
+## Full Result History
+
+### V2 Results (Kaggle, 2026-09-29) — BEST RESULT
+
+The V2 fusion model uses **spatial patch tokens** from DINOv2's `get_intermediate_layers(n=1, reshape=True)`, a **64-channel** 1x1 projection, and a **learnable sigmoid gate** that starts near zero. It was trained with the same Pascal VOC settings: 640px, batch 2, 10 epochs, AdamW, lr 0.001, FP32, seed 42, VOC2007 test holdout.
+
+| Model | Precision | Recall | mAP50 | mAP50-95 | Inference ms/img |
+|---|---:|---:|---:|---:|---:|
+| YOLOv8n baseline | 0.6768 | 0.6427 | 0.6852 | 0.4768 | 2.68 |
+| YOLOv8n + DINOv2 v1 (global token, 3ch) | 0.4617 | 0.3911 | 0.3691 | 0.2182 | 36.88 |
+| **YOLOv8n + DINOv2 v2 (patch tokens, 64ch, gated)** | **0.7810** | **0.7505** | **0.8213** | **0.5522** | 34.77 |
+
+**V2 beat the baseline by:**
+- mAP50: +13.6% (0.685 → 0.821)
+- mAP50-95: +7.5% (0.477 → 0.552)
+- Precision: +10.4% (0.677 → 0.781)
+- Recall: +10.8% (0.643 → 0.751)
+
+**Why V2 succeeded where V1 failed:**
+1. **Spatial patch tokens** carry location-specific features (`B×384×H_patch×W_patch`) instead of a single uniform vector. Detection needs to know *where* things are, not just *what* the image contains.
+2. **64 output channels** (vs. 3 in V1) give the detector a richer contextual representation.
+3. **Gated fusion** (`sigmoid(gate) × projected × 0.1`) starts near zero so the pretrained YOLO detector is initially unaffected, then gradually opens as the projector learns useful context.
+
+**Technical fix required:** Ultralytics' `parse_model` uses `else: c2 = ch[f]` for unknown custom modules, which incorrectly reports DINOv2's output as 3 (the input channel count) instead of 64. We patched `parse_model` to add a `c2 = args[0]` branch for DINOv2. The `register_modules()` function caches the original source to remain idempotent across multiple calls.
+
+### V1 Results (Kaggle, 2026-09-29)
+
+V1 used a **global class token** broadcast uniformly, projected to **3 channels**, with no gating. Trained with the same VOC settings.
+
+| Model | Precision | Recall | mAP50 | mAP50-95 | Inference ms/img |
+|---|---:|---:|---:|---:|---:|
+| YOLOv8n baseline | 0.6768 | 0.6427 | 0.6852 | 0.4768 | 2.68 |
+| YOLOv8n + DINOv2 v1 fusion | 0.4617 | 0.3911 | 0.3691 | 0.2182 | 36.88 |
+
+V1 was worse than the baseline on every metric and 13.8x slower. The global class token has no spatial detail — it broadcasts the same 3-channel values across the entire 20×20 grid. This uniform context did not help detection and likely interfered with the pretrained YOLO feature maps.
 
 ## Earlier COCO8 Results (Failed Run — Kept for Provenance)
 

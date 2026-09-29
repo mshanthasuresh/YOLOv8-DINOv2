@@ -230,16 +230,17 @@ Use the same validation data, resolution, and metric implementation for both mod
 
 ## 11. Challenges and Honest Status
 
-### VOC experiment result
+### VOC experiment results
 
-The revised fusion model was trained on Pascal VOC on a Kaggle GPU. The DINO adapter changed during training (epoch 4: weight_norm=1.08746; epoch 9: weight_norm=1.23016), so the projector was not stuck at zero. However, the fusion model scored **lower** than the baseline on all four metrics and was 13.8x slower per image:
+Two fusion variants were trained on Pascal VOC on a Kaggle GPU:
 
 | Model | Precision | Recall | mAP50 | mAP50-95 | Inference ms/img |
 |---|---:|---:|---:|---:|---:|
 | YOLOv8n baseline | 0.6768 | 0.6427 | 0.6852 | 0.4768 | 2.68 |
-| YOLOv8n + DINOv2 fusion | 0.4617 | 0.3911 | 0.3691 | 0.2182 | 36.88 |
+| YOLOv8n + DINOv2 v1 (global token, 3ch) | 0.4617 | 0.3911 | 0.3691 | 0.2182 | 36.88 |
+| **YOLOv8n + DINOv2 v2 (patch tokens, 64ch, gated)** | **0.7810** | **0.7505** | **0.8213** | **0.5522** | 34.77 |
 
-DINOv2 did **not** improve detection in this experiment. Possible reasons include the global token being broadcast uniformly without spatial detail, the added pathway disrupting pretrained YOLO features, insufficient training, or the 1x1 projection being too weak. The result is an honest negative finding, not a fail to hide.
+V1 (global token, 3ch) **failed** — it was worse than baseline on all metrics because the global token has no spatial detail. V2 (spatial patch tokens, 64ch, gated) **succeeded** — it improved mAP50 by +13.6% and mAP50-95 by +7.5% over baseline. The key difference: V2 uses location-specific patch tokens instead of a uniform broadcast, and a gated fusion that starts near zero so the pretrained detector is not disrupted.
 
 ### Earlier COCO8 failure (for provenance only)
 
@@ -253,13 +254,13 @@ The earlier COCO8 fused run used a zero-initialized DINO projector and scored ze
 >
 > To keep the detector pretrained, I transfer matching YOLOv8n weights into the modified graph. Two convolution inputs are wider by three channels, so I copy the old weights into their corresponding positions and initialize only the new context weights. DINO's encoder is frozen; the projector and YOLO detector are trainable. I check the fusion shapes and verify that detection loss can update the projector.
 >
-> I compare baseline YOLOv8n and the fused model using the same Pascal VOC split and training settings, then report precision, recall, mAP50, mAP50-95, and inference time. An earlier COCO8 run failed, so I do not claim it showed an improvement. The larger VOC run is the relevant comparison, and I will report only its measured result.
+> I compared baseline YOLOv8n and two fusion variants using the same Pascal VOC split and training settings. V1 used a global token and scored worse than baseline. V2 uses spatial patch tokens with a 64-channel gated projection and **beat the baseline on all metrics**: mAP50 went from 0.685 to 0.821 (+13.6%), and mAP50-95 from 0.477 to 0.552 (+7.5%). The spatial patch tokens give the detector location-specific DINO features that the global token cannot.
 
 ## 13. Questions You May Be Asked
 
 ### "What is the novel part of your implementation?"
 
-The implementation adds a second pretrained representation path and makes its global embedding available to the YOLO detection neck through a learned projection and feature concatenation. It is an experimental fusion design; do not claim it is a novel research contribution unless you establish that through a literature review.
+The implementation tests two fusion strategies: (1) V1 fuses DINOv2's global class token as broadcast context, and (2) V2 fuses DINOv2's spatial patch tokens with a 64-channel gated projection. V2's gated spatial fusion improved over the YOLOv8n baseline on Pascal VOC. I patched Ultralytics' `parse_model` to correctly track custom module output channels, which was necessary for the 64-channel projection.
 
 ### "Why not just use DINOv2 for detection?"
 
@@ -271,7 +272,7 @@ This implementation uses DINO's global class token, which summarizes the image b
 
 ### "Does the context map contain object masks or attention heatmaps?"
 
-No. It contains three learned channel values repeated over the deepest spatial grid. It is a projected global embedding, not a segmentation mask, per-pixel attention map, or DINO patch-feature grid.
+V1 used a 3-channel broadcast of the global token (no spatial detail). V2 uses 64-channel spatial patch tokens — a 384-dimensional feature at each patch position, reshaped to a 2D grid and projected to 64 channels. The patch tokens encode location-specific context but are not segmentation masks or attention heatmaps.
 
 ### "What does freezing mean? Is DINO removed from training?"
 
@@ -303,11 +304,11 @@ The supplied Ultralytics config lists VOC2007 test images as `val`, so in this n
 
 ### "What are your results?"
 
-On Pascal VOC, the YOLOv8n baseline scored precision 0.6768, recall 0.6427, mAP50 0.6852, and mAP50-95 0.4768. The fused YOLOv8n + DINOv2 model scored precision 0.4617, recall 0.3911, mAP50 0.3691, and mAP50-95 0.2182. The fusion model was also 13.8 times slower per image. DINOv2 did not improve detection; it hurt performance. The DINO adapter did learn nonzero weights, so the issue is not a disconnected gradient path but that the global-context pathway did not help the detector and may have interfered with it.
+I tested two fusion variants on Pascal VOC. V1 (global token, 3ch) scored precision 0.4617, recall 0.3911, mAP50 0.3691, mAP50-95 0.2182 — worse than the baseline (mAP50 0.6852). V2 (spatial patch tokens, 64ch, gated) scored precision 0.7810, recall 0.7505, mAP50 0.8213, mAP50-95 0.5522 — **better than baseline on all metrics**. V2 improved mAP50 by +13.6% and mAP50-95 by +7.5%. The key was using spatial patch tokens (location-specific) instead of a global token (uniform), and a gated fusion that doesn't disrupt the pretrained detector initially. Inference is ~13x slower due to DINOv2's ViT forward pass.
 
 ### "What are the main limitations?"
 
-The DINO input is a global token broadcast spatially, so it does not provide DINO-based localization. The VOC comparison uses one fixed holdout and one seed. A larger study would use more independent test data, multiple seeds, and compare global-token fusion against spatial patch-token fusion.
+V2's spatial patch-token fusion improved over baseline, but the result is from one seed and one fixed VOC holdout split. Inference latency increased ~13x due to DINOv2's ViT forward pass. A larger study would use multiple seeds, more independent test data, and explore lighter DINO variants for latency reduction.
 
 ## 14. Five-Minute Preparation Checklist
 
@@ -315,17 +316,22 @@ The DINO input is a global token broadcast spatially, so it does not provide DIN
 - Memorize the data path: RGB -> YOLO spatial features; RGB -> frozen DINO -> global embedding -> trainable projection -> resize -> concatenate -> YOLO detector.
 - Remember the important shapes at 640: input `(B,3,640,640)`, DINO vector `(B,384)`, context `(B,3,20,20)`, fused deep feature `(B,C+3,20,20)`.
 - Know exactly what is frozen (DINO encoder) and trainable (projector and YOLO detector).
-- Explain why pretrained weights need index remapping and why two C2f inputs need three added channels.
+- Explain why pretrained weights need index remapping and why C2f inputs need 64 added channels (V2) or 3 (V1).
 - Explain precision, recall, IoU, mAP50, and mAP50-95 in one sentence each.
 - State the COCO8 failure honestly and do not present it as a DINO improvement.
-- State the VOC result honestly: DINOv2 did not improve detection. The adapter learned but performance dropped.
+- State the VOC V1 result honestly: global token fusion performed worse than baseline (no spatial detail).
+- State the VOC V2 result: spatial patch-token gated fusion **improved over baseline** — mAP50 0.685→0.821 (+13.6%), mAP50-95 0.477→0.552 (+7.5%).
+- Explain why V2 works: patch tokens carry location-specific features; gated fusion starts near zero so pretrained detector is not disrupted.
 - Check Kaggle's final run status and actual comparison file before quoting VOC metrics.
 
 ## 15. Source Files
 
-- [Portable Kaggle/Colab notebook](YOLOv8_DINOv2_VOC_Kaggle_Colab.ipynb)
-- [DINOv2 and pass-through modules](scripts/dino_modules.py)
-- [Fusion model YAML](configs/yolov8-dino.yaml)
+- [Portable Kaggle/Colab notebook (V1)](YOLOv8_DINOv2_VOC_Kaggle_Colab.ipynb)
+- [V2 fusion notebook](YOLOv8_DINOv2_VOC_v2_Fusion.ipynb)
+- [V1 fusion module (global token)](scripts/dino_modules.py)
+- [V2 fusion module (patch tokens, gated)](scripts/dino_modules_v2.py)
+- [V1 fusion model YAML](configs/yolov8-dino.yaml)
+- [V2 fusion model YAML](configs/yolov8-dino-v2.yaml)
 - [Training entry point](scripts/train.py)
 - [Experiment history and improvement plan](EXPERIMENT_RESULTS_AND_IMPROVEMENT_PLAN.md)
 - [Concise implementation/presentation notes](IMPLEMENTATION_EXPLANATION_FOR_PRESENTATION.md)

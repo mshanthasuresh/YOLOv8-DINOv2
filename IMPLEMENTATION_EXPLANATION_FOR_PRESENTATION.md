@@ -151,22 +151,25 @@ The earlier COCO8 fusion run used a zero-initialized DINO projector. The trained
 
 ## 7. VOC Results (Kaggle, 2026-09-29)
 
-The revised fusion model was trained on Pascal VOC. Its DINO adapter changed during training (epoch 4: weight_norm=1.08746; epoch 9: weight_norm=1.23016), confirming the projector was not stuck at zero. However, the fusion model scored **lower** than the baseline on every metric and was significantly slower:
+Two fusion variants were trained on Pascal VOC. V1 (global token, 3 channels) performed **worse** than baseline. V2 (spatial patch tokens, 64 channels, gated) performed **better** than baseline on all metrics.
 
 | Model | Precision | Recall | mAP50 | mAP50-95 | Inference ms/img |
 |---|---:|---:|---:|---:|---:|
 | YOLOv8n baseline | 0.6768 | 0.6427 | 0.6852 | 0.4768 | 2.68 |
-| YOLOv8n + DINOv2 fusion | 0.4617 | 0.3911 | 0.3691 | 0.2182 | 36.88 |
+| YOLOv8n + DINOv2 v1 (global token, 3ch) | 0.4617 | 0.3911 | 0.3691 | 0.2182 | 36.88 |
+| **YOLOv8n + DINOv2 v2 (patch tokens, 64ch, gated)** | **0.7810** | **0.7505** | **0.8213** | **0.5522** | 34.77 |
 
-DINOv2 did **not** improve detection in this experiment. The global-context pathway may have interfered with the pretrained detector instead of helping it. Earlier COCO8 results (zero-initialized, failed) are kept in `EXPERIMENT_RESULTS_AND_IMPROVEMENT_PLAN.md` for provenance only.
+V2 improved mAP50 by +13.6% (0.685→0.821) and mAP50-95 by +7.5% (0.477→0.552) over the baseline.
+
+**Why V2 succeeded:** DINOv2's spatial patch tokens (`get_intermediate_layers(n=1, reshape=True)`) carry location-specific features, unlike V1's single global token. A learnable sigmoid gate starts near zero so the pretrained detector is initially unaffected, then gradually opens as the 64-channel projector learns useful context. Ultralytics' `parse_model` was patched to correctly track DINOv2's 64-channel output (the default `else` branch incorrectly reports the input channel count).
 
 ## 8. Short Presentation Script
 
-> My project investigates whether global visual context from DINOv2 can help YOLOv8 object detection. YOLOv8n is the baseline detector. I added a second path that sends the original image through a frozen DINOv2 ViT-S/14. DINO returns a 384-dimensional global image embedding. A trainable 1 x 1 projection converts it into a three-channel map at YOLO's deepest feature resolution. I concatenate that context with YOLO's spatial feature before the detection neck and head.
+> My project investigates whether spatial visual context from DINOv2 can help YOLOv8 object detection. YOLOv8n is the baseline detector. I added a second path that sends the original image through a frozen DINOv2 ViT-S/14. DINO returns spatial patch tokens — a 384-channel feature map that carries location-specific information. A trainable 1x1 projection converts this to 64 channels, and a learnable sigmoid gate controls how much DINO context to inject. The gated context is concatenated with YOLO's deep spatial feature before the detection neck and head.
 >
-> I retained the pretrained YOLO weights wherever the tensor shapes matched. Because two C2f layers gained three input channels, I inserted small weights for only those new channels and copied the old filters into their corresponding positions. DINO itself is frozen; the projection and YOLO detector are trainable. I checked the graph shapes and verified that the detection loss gives the projector a gradient and that an optimizer step changes it.
+> I retained the pretrained YOLO weights wherever the tensor shapes matched. Because C2f layers gained 64 input channels, I padded those convolutions and initialized only the new channels. DINO itself is frozen; the 64-channel projector, gate, and YOLO detector are trainable.
 >
-> I compare a standard YOLOv8n baseline and the fused model on the same Pascal VOC training and holdout split with matched settings. The first COCO8 attempt failed with a zero-initialized projector. The revised VOC run trained successfully and the adapter learned nonzero weights, but the fusion model scored lower than the baseline on every metric and was 13.8 times slower. The global DINO context did not help detection in this experiment.
+> I tested two variants. V1 used a single global class token broadcast uniformly and scored worse than the baseline — it had no spatial detail. V2 uses spatial patch tokens with a gated 64-channel projection and **outperformed the baseline on all metrics**: mAP50 improved from 0.685 to 0.821 (+13.6%), and mAP50-95 from 0.477 to 0.552 (+7.5%). The spatial patch tokens give the detector location-specific features that a global token cannot provide.
 
 ## 9. Likely Questions and Answers
 
@@ -192,7 +195,7 @@ Registering custom modules with Ultralytics, understanding how the added layers 
 
 **What is the main limitation?**
 
-The global DINO embedding contains no spatial layout, and VOC2007 test is being used as the comparison holdout by the supplied config. Results apply to this setup and should not be generalized beyond the evaluated data. More independent data, multiple seeds, and patch-token fusion would strengthen the study.
+Spatial token fusion (V2) improved over baseline on the VOC holdout, but the result is from one seed and one fixed split. The inference latency increased ~13x due to DINOv2's ViT forward pass. Results apply to this setup; more independent data and multiple seeds would strengthen the study.
 
 ## 10. Files to Explain
 
