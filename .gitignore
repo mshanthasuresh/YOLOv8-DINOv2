@@ -1,0 +1,28 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+
+# Local datasets and generated artifacts
+/data/
+/runs/
+/results/
+/weights/
+*.pt
+
+# Secrets
+.kaggle/
+.env
+*.env
+*.pem
+*.key
+
+# Editors/OS
+.vscode/
+.ipynb_checkpoints/
+Thumbs.db
+.DS_Store
+
+# Presenter transcripts and temporary logs
+/src/
+*.log
