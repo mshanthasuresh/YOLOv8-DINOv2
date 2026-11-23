@@ -1,0 +1,14 @@
+{
+  "id": "mshanthasuresh/dlva-yolov8-dinov2-normalization",
+  "title": "DLVA: YOLOv8-DINOv2 normalization ablation",
+  "code_file": "nafuse_kaggle.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": false,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "competition_sources": [],
+  "dataset_sources": [],
+  "kernel_sources": [],
+  "model_sources": []
+}
