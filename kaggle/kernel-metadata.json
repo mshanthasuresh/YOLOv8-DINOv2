@@ -1,6 +1,6 @@
 {
-  "id": "mshanthasuresh/dlva-yolov8-dinov2-normalization",
-  "title": "DLVA: YOLOv8-DINOv2 normalization ablation",
+  "id": "shanthasuresh/dlva-yolov8-dinov2-normalization-ablation",
+  "title": "DLVA YOLOv8-DINOv2 normalization ablation",
   "code_file": "nafuse_kaggle.ipynb",
   "language": "python",
   "kernel_type": "notebook",
