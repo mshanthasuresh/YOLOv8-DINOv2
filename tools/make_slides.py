@@ -32,9 +32,18 @@ SAND = RGBColor(0xF8, 0xE2, 0xDC)
 GREY = RGBColor(0x5F, 0x6B, 0x69)
 LIGHT = RGBColor(0xF3, 0xF6, 0xF5)
 WHITE = RGBColor(0xFF, 0xFF, 0xFF)
-SHORT = {"baseline": "YOLOv8n", "nonorm": "No norm", "ln": "LN only", "gn": "GN only", "lngn": "LN+GN", "gated": "Gated"}
+SHORT = {
+    "baseline": "YOLOv8n",
+    "nonorm": "No norm",
+    "ln": "LN only",
+    "gn": "GN only",
+    "lngn": "LN+GN",
+    "gated": "Gated",
+    "global": "Global DINO",
+    "gatedlow": "Gated, low init",
+}
 ARMS = ("baseline", "nonorm", "ln", "gn", "lngn", "gated")
-TOTAL = 16
+TOTAL = 0  # set from the builder list in main()
 
 
 # ----------------------------------------------------------------------------------------------- formatting
@@ -52,6 +61,17 @@ def ci_text(d):
 
 def excludes_zero(d):
     return d["ci_map"][0] > 0 or d["ci_map"][1] < 0
+
+
+def ci_short(d):
+    return f"{signed(d['delta_map'])} [{signed(d['ci_map'][0])}, {signed(d['ci_map'][1])}]"
+
+
+def p_text(d, key="p_holm_map"):
+    p = d.get(key)
+    if p is None:
+        return "–"
+    return f"< {1 / d['n_boot']:.3f}" if p == 0 else f"= {p:.3f}"
 
 
 # ----------------------------------------------------------------------------------------------- primitives
@@ -187,7 +207,8 @@ def notes(slide, body):
     slide.notes_slide.notes_text_frame.text = body.strip()
 
 
-def new_slide(prs, number, section, title, lede=None):
+def new_slide(prs, section, title, lede=None):
+    number = len(prs.slides) + 1
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     text(slide, 0.6, 0.32, 9, 0.3, f"{number:02d}  /  {section.upper()}", size=10, bold=True, color=TEAL)
     text(slide, 0.6, 0.58, 12.1, 0.8, title, size=26 if len(title) <= 60 else 22, bold=True)
@@ -215,6 +236,27 @@ class Facts:
         self.tokens = summary.get("tokens") or {}
         self.diag = summary.get("diagnostics") or {}
         self.figs = summary.get("figures") or {}
+        self.bootall = summary.get("bootstrap") or {}
+        self.margin = summary.get("equivalence_margin") or 0.005
+
+    def b(self, section, key):
+        return (self.bootall.get(section) or {}).get(key)
+
+    def equivalence_sentence(self):
+        arms = [a for a in ("ln", "gn", "lngn") if "ci90_map" in (self.boot_nn.get(a) or {})]
+        if not arms:
+            return self.delta_sentence("lngn", "nonorm")
+        eq = sum(bool(self.boot_nn[a].get("equivalent")) for a in arms)
+        widest = max(abs(v) for a in arms for v in self.boot_nn[a]["ci90_map"])
+        out = f"Normalization: {eq} of {len(arms)} LN/GN arms are equivalent to no norm (90% CIs within ±{100 * widest:.2f} < ±{100 * self.margin:.1f} points)"
+        g = self.boot_nn.get("gated")
+        if g:
+            out += f"; gated {signed(g['delta_map'], 2)}, Holm p {p_text(g)}"
+        return out
+
+    def h1_rejected(self):
+        arms = [self.boot_nn.get(a) or {} for a in ("ln", "gn", "lngn")]
+        return all(d.get("equivalent") for d in arms)
 
     def mean(self, arm, key="test_map"):
         return (self.main.get(arm) or {}).get(f"{key}_mean")
@@ -263,7 +305,7 @@ def slide_title(prs, f: Facts):
     callout(slide, 8.95, 0.9, 3.95, 1.7, big, small, fill=RGBColor(0x29, 0x4A, 0x43))
     runs = f.s.get("n_runs", 0)
     hours = sum(r.get("train_hours", 0) or 0 for r in f.s.get("runs", []))
-    callout(slide, 8.95, 2.85, 3.95, 1.7, f"{runs}", f"trained & held-out-evaluated runs\n{hours:.0f} GPU-hours on one laptop GPU", fill=RGBColor(0x29, 0x4A, 0x43))
+    callout(slide, 8.95, 2.85, 3.95, 1.7, f"{runs}", f"trained & held-out-evaluated runs\n{hours:.0f} GPU-hours of training", fill=RGBColor(0x29, 0x4A, 0x43))
     b = f.bench.get(("yolov8n", "lngn", 518), {})
     base = f.bench.get(("yolov8n", "baseline", None), {})
     cost = f"{b['gflops_total'] / base['gflops_total']:.0f}×" if b and base else "pending"
@@ -275,7 +317,7 @@ Today I'll show what actually causes the gain, how big it is once you control fo
 
 
 def slide_problem(prs, f: Facts):
-    s = new_slide(prs, 2, "Starting point", "Midterm evidence: a big jump — but five things changed at once", "Single-seed IUI runs (10 epochs, batch 2). The test split was also used to pick the checkpoint.")
+    s = new_slide(prs, "Starting point", "Midterm evidence: a big jump — but five things changed at once", "Single-seed IUI runs (10 epochs, batch 2). The test split was also used to pick the checkpoint.")
     rows = [
         ["Model (historical, 1 seed)", "mAP50", "mAP50-95", "ms/img"],
         ["YOLOv8n baseline", "68.5", "47.7", "2.7"],
@@ -303,7 +345,7 @@ finding and fixing it is part of the contribution, and it's why the old 'baselin
 
 
 def slide_question(prs, f: Facts):
-    s = new_slide(prs, 3, "Research question", "Does normalization make DINOv2 context reliably useful?")
+    s = new_slide(prs, "Research question", "Does normalization make DINOv2 context reliably useful?")
     rect(s, 0.6, 1.75, 12.15, 1.15, INK)
     text(s, 0.85, 1.83, 11.7, 1.0, "Q: When frozen DINOv2 patch features are fused into a pretrained YOLOv8n, does explicit normalization (token LayerNorm, projected GroupNorm) — rather than fusion itself — explain a stable gain, and does that gain justify the ViT's inference cost?", size=15, color=WHITE, anchor=MSO_ANCHOR.MIDDLE)
     hyps = [
@@ -320,7 +362,7 @@ def slide_question(prs, f: Facts):
 
 
 def slide_related(prs, f: Facts):
-    s = new_slide(prs, 4, "Related work & gap", "ViT→CNN fusion is common; isolating why it works is not")
+    s = new_slide(prs, "Related work & gap", "ViT→CNN fusion is common; isolating why it works is not")
     rows = [
         ["Work", "What it establishes", "What it leaves open here"],
         ["DINOv2 (Oquab et al., 2023)", "Frozen SSL patch features transfer to dense tasks", "How to inject them into a pretrained CNN"],
@@ -337,7 +379,7 @@ def slide_related(prs, f: Facts):
 
 
 def slide_method(prs, f: Facts):
-    s = new_slide(prs, 5, "Method", "Architecture: DINOv2 context enters the neck right after SPPF")
+    s = new_slide(prs, "Method", "Architecture: DINOv2 context enters the neck right after SPPF")
     y = 2.0
     boxes = [
         (0.6, y + 1.05, 1.5, 0.75, "Image\n640×640", LIGHT, INK),
@@ -360,7 +402,7 @@ def slide_method(prs, f: Facts):
     arrow(s, 6.8, y + 2.12, 8.15, y + 2.12)
     arrow(s, 8.85, y + 1.0, 8.85, y + 1.75)
     arrow(s, 9.55, y + 2.12, 10.0, y + 2.12)
-    label_box(s, 0.6, 4.85, 4.0, 2.0, "Five adapter arms (one factor each)", "No norm · LN only · GN only · LN+GN (supplied) · historical gated design. α = 0.05 fixed; gated: σ(g)·0.1, g=0.", body_size=12)
+    label_box(s, 0.6, 4.85, 4.0, 2.0, "Five arms + two controls", "No norm · LN only · GN only · LN+GN (supplied) · gated. α = 0.05; gated: σ(g)·0.1. Controls: LN+GN on the image-mean token (no layout); gated with the small projector init.", body_size=11.5)
     label_box(s, 4.8, 4.85, 3.9, 2.0, "Fix 1 — channel-correct transfer", "P5 keeps its channels first; DINO channels are appended. Pretrained filters of the two consuming convs are copied at their exact offsets (L12: 256|64|128, L21: 128|256|64).", fill=SAND, title_color=CORAL, body_size=12)
     label_box(s, 8.9, 4.85, 3.85, 2.0, "Fix 2 — function-preserving init", "DINO input columns start at zero ⇒ the untrained fused model is the baseline. Unit test: max |Δ output| = 0 for all five arms.", body_size=12)
     notes(s, """
@@ -371,7 +413,7 @@ DINOv2 is held outside the model's parameters: never trained, never in the check
 
 
 def slide_protocol(prs, f: Facts):
-    s = new_slide(prs, 6, "Protocol", "Same data, schedule and init for every arm; test used once")
+    s = new_slide(prs, "Protocol", "Same data, schedule and init for every arm; test used once")
     rows = [
         ["Split", "Images", "Role"],
         ["VOC12 train+val + VOC07 train", "14,041", "training"],
@@ -389,16 +431,55 @@ def slide_protocol(prs, f: Facts):
             "3 seeds per headline arm; seed changes init of new layers and data order",
             "Best epoch by dev fitness only; test evaluated once with the selected checkpoint",
             "Metrics: mAP50-95, mAP50, P, R, COCO small/medium/large AP, params, FLOPs, end-to-end latency incl. DINOv2",
-            "Statistics: seed-paired image bootstrap (400 replicates) → 95% CI of Δ mAP",
+            "Statistics: seed-paired image bootstrap (400 replicates) → 95% CI of Δ mAP; equivalence = 90% CI inside ±0.5 points (TOST); Holm correction over the 4 normalization comparisons",
             "Mechanism logging every 50 iterations: feature-scale ratio, gradient ratio, DINO share of the first neck conv",
+            "Error analysis: TIDE-style AP50 decomposition from the saved per-image matches",
         ],
-        size=12,
+        size=11.5,
+        gap=4,
     )
     notes(s, "Stress: dev for selection, test once. The bootstrap resamples test images jointly for paired models, so the CI is about the difference.")
 
 
+def slide_experiments(prs, f: Facts):
+    runs = f.s.get("runs", [])
+    hours = sum(r.get("train_hours", 0) or 0 for r in runs)
+    s = new_slide(prs, "Experiment map", "Depth: every claim has its own controlled experiment", f"{len(runs)} trained runs, {hours:.0f} GPU-hours. Every run: checkpoint picked on VOC07 val, scored once on the held-out test split.")
+
+    def n(**kw):
+        return sum(all(r.get(k) == v for k, v in kw.items()) for r in runs)
+
+    def ans(d, fmt=ci_short):
+        return fmt(d) if d else "pending (Kaggle run)"
+
+    pts = {p["label"]: p for p in (f.s.get("cost_curve") or [])}
+    res = ", ".join(f"{k[7:]}: {pct(pts[k]['test_map_mean'])}" for k in ("LN+GN @224", "LN+GN @448", "LN+GN @518") if k in pts)
+    e = f.s.get("errors") or {}
+    err = f"wrong-class dAP {100 * e['baseline']['dap50_mean']['cls']:.1f} → {100 * e['lngn']['dap50_mean']['cls']:.1f}" if "baseline" in e and "lngn" in e else "pending"
+    shares = [v["L12/dino_share"]["end"] for v in f.diag.values() if "L12/dino_share" in v]
+    mech = f"final DINO share {min(shares):.2f}–{max(shares):.2f} across arms" if shares else "pending"
+    norm = "pending"
+    if "ci90_map" in (f.boot_nn.get("lngn") or {}):
+        norm = "no — LN/GN ≡ no norm (±0.5)" if f.h1_rejected() else "no significant difference"
+    rows = [
+        ["Question", "Experiment (one factor varies)", "Runs", "Answer (Δ mAP50-95, 95% CI)"],
+        ["Does fusion help?", "YOLOv8n vs LN+GN fusion, 3 seeds", n(group="main", arm="baseline") + n(group="main", arm="lngn"), ans(f.boot.get("lngn"))],
+        ["H1: does normalization matter?", "No norm / LN / GN / LN+GN / gated adapters", n(group="main") - n(group="main", arm="baseline"), norm],
+        ["Is it the spatial layout?", "LN+GN on the image-mean DINO token", n(group="control", arm="global"), ans(f.b("control", "spatial_vs_global"))],
+        ["Why does gating win?", "Gated arm with the small projector init", n(group="control", arm="gatedlow"), ans(f.b("control", "gated_vs_gatedlow"))],
+        ["H3: is it just compute?", "YOLOv8s baseline (3.5× YOLOv8n FLOPs)", n(group="capacity"), ans(f.b("capacity", "lngn518_vs_yolov8s"))],
+        ["How much ViT resolution?", "DINOv2 input 224 / 336 / 448 / 518 px", n(group="resolution"), res or "pending"],
+        ["H4: fewer labels?", "10% of VOC labels, baseline vs LN+GN", n(group="lowdata"), ans(f.b("lowdata", "lngn"))],
+        ["H4: another domain?", "VisDrone aerial: baseline / no norm / LN+GN", n(group="visdrone"), ans(f.b("visdrone", "lngn"))],
+        ["Which errors are fixed?", "TIDE-style AP50 error decomposition", "analysis", err],
+        ["How is DINO used in training?", "DINO share, feature & gradient ratios / 50 it", "analysis", mech],
+    ]
+    table(s, 0.6, 2.0, 12.15, rows, [2.75, 4.5, 0.8, 4.1], size=10.5, row_h=0.43)
+    notes(s, "This slide is the answer to 'depth of experimentation': each row is a separate, controlled question with its own runs. Rows marked pending are running on Kaggle.")
+
+
 def slide_statistics(prs, f: Facts):
-    s = new_slide(prs, 7, "Why normalization could matter", "Each normalization arm injects DINOv2 at a different scale")
+    s = new_slide(prs, "Why normalization could matter", "Each normalization arm injects DINOv2 at a different scale")
     picture(s, f.fig("token_stats"), 0.6, 1.8, 8.3, 3.6)
     t = f.tokens
     if t:
@@ -412,12 +493,12 @@ def slide_statistics(prs, f: Facts):
     else:
         items = ["token statistics pending"]
     bullets(s, 9.1, 1.8, 3.7, 5.0, items, size=11.5, gap=8)
-    text(s, 0.6, 5.65, 8.3, 1.2, [[("Answer to 'why LN + GN?': ", {"bold": True, "color": CORAL}), ("normalization sets how strongly the frozen ViT stream speaks relative to the CNN stream. LN re-centres each token (fresh affine); GN fixes the projected map's overall scale independent of batch size; α keeps it small so the pretrained detector is not disrupted.", {})]], size=12)
-    notes(s, "This is the slide that answers the midterm question I could not answer. Numbers on the right are measured on 400 dev images.")
+    text(s, 0.6, 5.65, 8.3, 1.2, [[("Testable prediction: ", {"bold": True, "color": CORAL}), ("normalization decides how loudly the frozen ViT stream speaks relative to the CNN stream — a 10× spread at initialization. If that scale drives the gain, the arms must end at different accuracies. The next slides test exactly this.", {})]], size=12)
+    notes(s, "This is the 'why LN+GN' argument turned into a falsifiable prediction. Numbers on the right are measured on 400 dev images.")
 
 
 def slide_main(prs, f: Facts):
-    s = new_slide(prs, 8, "Main result", "Held-out VOC07 test: does fusion help beyond seed noise?")
+    s = new_slide(prs, "Main result", "Held-out VOC07 test: does fusion help beyond seed noise?")
     picture(s, f.fig("main_map"), 0.6, 1.75, 7.2, 3.7)
     if f.fig("delta_ci"):
         picture(s, f.fig("delta_ci"), 0.6, 5.35, 7.2, 1.6)
@@ -431,13 +512,13 @@ def slide_main(prs, f: Facts):
     if len(rows) > 1:
         hl = [i for i, r in enumerate(rows) if r[0] == "LN+GN"]
         table(s, 8.05, 1.8, 4.7, rows, [1.25, 0.45, 1.25, 0.85, 0.9], size=10.5, row_h=0.36, highlight_rows=hl)
-    lines = [f.delta_sentence("lngn"), f.delta_sentence("lngn", "nonorm")]
-    bullets(s, 8.05, 1.95 + 0.36 * len(rows), 4.7, 2.6, lines, size=11.5)
-    notes(s, "Say the headline number with its CI. If a comparison is within noise, say so — that is a finding, not a failure.")
+    lines = [f.delta_sentence("lngn"), f.equivalence_sentence()]
+    bullets(s, 8.05, 1.95 + 0.36 * len(rows), 4.7, 2.6, [l for l in lines if l], size=11)
+    notes(s, "Say the headline number with its CI. 'Not significant' is not the claim for normalization — the claim is equivalence: the 90% CI of every LN/GN arm vs no-norm lies inside ±0.5 points.")
 
 
 def slide_mechanism(prs, f: Facts):
-    s = new_slide(prs, 9, "Mechanism", "How much does the detector actually listen to DINOv2?")
+    s = new_slide(prs, "Mechanism", "How much does the detector actually listen to DINOv2?")
     picture(s, f.fig("diagnostics"), 0.6, 1.7, 8.0, 5.2)
     items = []
     for arm in ("nonorm", "ln", "gn", "lngn", "gated"):
@@ -445,12 +526,40 @@ def slide_mechanism(prs, f: Facts):
         if d:
             items.append([(f"{SHORT[arm]}: ", {"bold": True}), (f"DINO share of first neck conv {d['start']:.2f} → {d['end']:.2f}", {})])
     bullets(s, 8.85, 1.8, 3.95, 3.2, items or ["diagnostics pending"], size=11.5)
-    text(s, 8.85, 5.1, 3.95, 1.8, "DINO share = RMS of the conv response to DINO channels ÷ (DINO + YOLO responses). It starts at exactly 0 (zero-init) and shows how fast each arm learns to use the context.", size=10.5, color=GREY)
-    notes(s, "Interpretation: if an arm's share stays near zero, the detector is ignoring DINOv2 — its accuracy should then match the baseline.")
+    shares = [f.diag[a]["L12/dino_share"]["end"] for a in ("nonorm", "ln", "gn", "lngn") if "L12/dino_share" in f.diag.get(a, {})]
+    maps = [f.mean(a) for a in ("nonorm", "ln", "gn", "lngn") if f.mean(a) is not None]
+    if len(shares) > 1 and len(maps) > 1:
+        text(s, 8.85, 4.55, 3.95, 1.0, [[("Reading: ", {"bold": True, "color": CORAL}), (f"reliance on DINOv2 differs {max(shares) / min(shares):.1f}× between the normalization arms, accuracy by only {100 * (max(maps) - min(maps)):.2f} points — the detector rescales the context itself.", {})]], size=11)
+    text(s, 8.85, 5.75, 3.95, 1.2, "DINO share = RMS of the conv response to DINO channels ÷ (DINO + YOLO responses). It starts at exactly 0 (zero-init).", size=10, color=GREY)
+    notes(s, "Interpretation: normalization changes how much the detector leans on DINOv2, but every arm reaches the same accuracy — so the scale argument for LN+GN does not survive training.")
+
+
+def slide_controls(prs, f: Facts):
+    s = new_slide(prs, "Controls", "What part of DINOv2 helps, and why does the gated design win?", "Two extra arms, each changing exactly one factor of an existing arm.")
+    picture(s, f.fig("controls"), 0.6, 1.95, 7.4, 3.9)
+    items = []
+    lay, glob = f.b("control", "spatial_vs_global"), f.b("control", "global_vs_baseline")
+    if lay and glob:
+        total = lay["delta_map"] + glob["delta_map"]
+        share = f" — {100 * lay['delta_map'] / total:.0f}% of the fusion gain needs the layout" if total > 0 else ""
+        items.append([("Layout vs global vector: ", {"bold": True}), (f"the image-mean DINO token gives {signed(glob['delta_map'])} over YOLOv8n; the spatial map adds {signed(lay['delta_map'])} ({ci_text(lay)}){share}.", {})])
+    else:
+        items.append([("Layout vs global vector: ", {"bold": True}), ("pending (Kaggle run).", {})])
+    gate, low = f.b("control", "gated_vs_gatedlow"), f.b("control", "gatedlow_vs_nonorm")
+    if gate and low:
+        low_gain = excludes_zero(low) and low["delta_map"] > 0
+        init_gain = excludes_zero(gate) and gate["delta_map"] > 0
+        cause = "both the gate and the larger init" if low_gain and init_gain else "the learnable gate" if low_gain else "the larger projector init" if init_gain else "neither factor alone (within noise)"
+        items.append([("Gate vs init: ", {"bold": True}), (f"gated with the small init vs no norm {signed(low['delta_map'], 2)} ({ci_text(low)}); larger init {signed(gate['delta_map'], 2)} ({ci_text(gate)}) → the gated advantage comes from {cause}.", {})])
+    else:
+        items.append([("Gate vs init: ", {"bold": True}), ("pending (Kaggle run). The gated arm differs from no norm in two ways — learnable gate and 4× larger projector init — this run separates them.", {})])
+    bullets(s, 8.25, 1.95, 4.5, 4.9, items, size=11.5, gap=10)
+    text(s, 0.6, 6.0, 7.4, 0.9, "Global control: the same LN+GN adapter, but the 37×37 token map is averaged to one vector and broadcast — same channels, same GN-fixed scale, no spatial layout.", size=10.5, color=GREY)
+    notes(s, "If the global vector gets most of the gain, DINOv2 acts as an image-level scene prior; if the layout matters, it is acting as dense, spatially aligned semantics.")
 
 
 def slide_curves(prs, f: Facts):
-    s = new_slide(prs, 10, "Training budget", "Does the gap close as YOLO trains longer?")
+    s = new_slide(prs, "Training budget", "Does the gap close as YOLO trains longer?")
     picture(s, f.fig("dev_curves"), 0.6, 1.75, 7.6, 4.6)
     items = []
     if f.mean("baseline") is not None:
@@ -465,7 +574,7 @@ def slide_curves(prs, f: Facts):
 
 
 def slide_where(prs, f: Facts):
-    s = new_slide(prs, 11, "Where it helps", "Object size and class: what the context fixes")
+    s = new_slide(prs, "Where it helps", "Object size and class: what the context fixes")
     picture(s, f.fig("size_bins"), 0.6, 1.75, 6.4, 3.4)
     picture(s, f.fig("per_class_delta"), 7.2, 1.75, 5.6, 5.1)
     items = []
@@ -483,8 +592,28 @@ def slide_where(prs, f: Facts):
     notes(s, "DINOv2 tokens are 14-px patches resized to a 20×20 grid: expect help on medium/large objects and semantic confusions, little on tiny objects.")
 
 
+def slide_errors(prs, f: Facts):
+    s = new_slide(prs, "Error analysis", "Which detection errors does DINOv2 context remove?", "TIDE-style decomposition (Bolya et al., ECCV 2020): each error type is fixed by an oracle; the AP50 it recovers is its cost.")
+    picture(s, f.fig("error_types"), 0.6, 1.95, 8.4, 3.9)
+    e = f.s.get("errors") or {}
+    items, change = [], {}
+    if "baseline" in e and "lngn" in e:
+        b, l = e["baseline"], e["lngn"]
+        for key, label in (("cls", "wrong class"), ("loc", "poor box"), ("bkg", "background"), ("miss", "missed")):
+            x, y = 100 * b["dap50_mean"][key], 100 * l["dap50_mean"][key]
+            change[label] = (y - x) / x if x else 0.0
+            items.append([(f"{label}: ", {"bold": True}), (f"{x:.2f} → {y:.2f} AP50 ({100 * change[label]:+.0f}%)", {})])
+        cb, cl = b["counts_mean"], l["counts_mean"]
+        items.append([("At conf ≥ 0.25: ", {"bold": True}), (f"wrong-class detections {cb['cls']:.0f} → {cl['cls']:.0f}; missed objects {cb['missed']:.0f} → {cl['missed']:.0f} of {cb['n_gt']:.0f}; background detections {cb['bkg']:.0f} → {cl['bkg']:.0f}", {})])
+    bullets(s, 9.2, 1.95, 3.6, 4.9, items or ["error analysis pending"], size=11, gap=6)
+    if change:
+        ranked = sorted(change.items(), key=lambda kv: kv[1])
+        text(s, 0.6, 6.0, 8.4, 0.9, [[("Reading: ", {"bold": True, "color": CORAL}), (f"the largest relative drop is '{ranked[0][0]}' ({100 * ranked[0][1]:+.0f}%), the smallest '{ranked[-1][0]}' ({100 * ranked[-1][1]:+.0f}%). Means over 3 seeds per arm.", {})]], size=12)
+    notes(s, "Each non-matching detection is assigned one error type in TIDE's order (background, localization, classification, duplicate, both). dAP = AP50 after fixing only that type minus AP50 as measured. The unfixed AP50 reproduces Ultralytics' value to 0.01 points.")
+
+
 def slide_cost(prs, f: Facts):
-    s = new_slide(prs, 12, "Cost", "Is the accuracy worth a ViT? Cost and a bigger-CNN control")
+    s = new_slide(prs, "Cost", "Is the accuracy worth a ViT? Cost and a bigger-CNN control")
     picture(s, f.fig("cost_curve"), 0.6, 1.75, 8.0, 3.2)
     rows = [["Model", "GFLOPs", "ms/img (b32)", "ms (b1)", "params"]]
     for key, label in (
@@ -515,7 +644,7 @@ def slide_cost(prs, f: Facts):
 
 
 def slide_regimes(prs, f: Facts):
-    s = new_slide(prs, 13, "Generalization", "Fewer labels and a far domain")
+    s = new_slide(prs, "Generalization", "Fewer labels and a far domain")
     picture(s, f.fig("data_regimes"), 0.6, 1.75, 7.4, 4.0)
     items = []
     for key, label in (("lowdata", "VOC 10% labels"), ("visdrone", "VisDrone (aerial, tiny objects)")):
@@ -530,13 +659,15 @@ def slide_regimes(prs, f: Facts):
     d = f.delta("lngn")
     if d is not None:
         items.append(f"Reference, VOC 100% labels: {signed(d)}")
+    vn = f.b("visdrone_vs_nonorm", "lngn")
+    items.append(f"VisDrone, LN+GN vs no norm: {ci_short(vn)} — " + ("normalization matters here" if excludes_zero(vn) else "normalization again within noise") if vn else "VisDrone, LN+GN vs no norm (H1 on a second domain): pending")
     bullets(s, 8.3, 1.9, 4.5, 4.5, items, size=12)
     text(s, 0.6, 5.95, 12.1, 0.9, "No generalization claim is made from VOC alone; VisDrone tests whether frozen natural-image features still help when objects are tiny and viewpoints are aerial.", size=11.5, color=GREY)
     notes(s, "If the 10%-label gain is larger, the story is 'self-supervised features substitute for labels'.")
 
 
 def slide_qualitative(prs, f: Facts):
-    s = new_slide(prs, 14, "Examples", "Where fusion helps — and where it hurts")
+    s = new_slide(prs, "Examples", "Where fusion helps — and where it hurts")
     q = f.s.get("qualitative") or {}
     figs = q.get("figures") or [None, None]
     picture(s, figs[0], 0.6, 1.7, 8.2, 5.25)
@@ -546,16 +677,48 @@ def slide_qualitative(prs, f: Facts):
     notes(s, "Images are chosen automatically by the largest per-image score change between baseline seed 0 and LN+GN seed 0.")
 
 
+def slide_threats(prs, f: Facts):
+    s = new_slide(prs, "Validity", "Threats to validity, and what was done about each")
+    rows = [
+        ["Threat", "What was done", "What remains"],
+        ["Run-to-run noise", "3 seeds per arm; seed-paired image bootstrap (400 replicates) for every Δ", "3 seeds is a small sample of training noise"],
+        ["Selecting on the test set", "Checkpoint picked on VOC07 val; test scored once per run", "—"],
+        ["Confounded changes", "One factor per arm; controls for spatial layout and for the gate's init", "Adapter width (64) and α not varied"],
+        ["'Not significant' ≠ 'no effect'", "Equivalence test (90% CI inside ±0.5 points); Holm over the 4 normalization comparisons", "The ±0.5 margin is a judgment call"],
+        ["Implementation bugs", "17 unit tests (zero-init equality, channel offsets, resume, error types); bootstrap AP equals Ultralytics exactly", "—"],
+        ["Gain bought with compute", "YOLOv8s control; DINOv2 resolution sweep; FLOPs and batched latency", "Latency on one GPU type"],
+        ["One dataset", "10%-label regime; VisDrone aerial domain", "Two datasets, one ViT size"],
+        ["Short schedule", "Same 15 epochs for every arm; dev curves inspected", "Longer training may narrow the gap"],
+    ]
+    table(s, 0.6, 1.8, 12.15, rows, [2.75, 5.7, 3.7], size=11, row_h=0.52)
+    notes(s, "Quality of analysis is mostly about ruling out the boring explanations. Walk the left column and say which slide rules each one out.")
+
+
 def slide_conclusion(prs, f: Facts):
-    s = new_slide(prs, 15, "Conclusions", "What the controlled study says")
-    items = [f.delta_sentence("lngn"), f.delta_sentence("lngn", "nonorm")]
-    for arm in ("ln", "gn", "gated"):
-        if arm in f.main:
-            items.append(f.delta_sentence(arm, "nonorm"))
+    s = new_slide(prs, "Conclusions", "What the controlled study says")
+    items = []
+    if "ci90_map" in (f.boot_nn.get("lngn") or {}):
+        verdict = "rejected. " if f.h1_rejected() else "not supported. "
+        items.append([("H1 normalization — " + verdict, {"bold": True, "color": CORAL}), (f.equivalence_sentence() + ". It changes the injected scale 10×, not the accuracy.", {})])
+    boot = f.boot.get("lngn")
+    if boot:
+        items.append([("H2 fusion — " + ("supported. " if excludes_zero(boot) else "not supported. "), {"bold": True, "color": TEAL}), (f.delta_sentence("lngn"), {})])
+    cap = f.b("capacity", "lngn518_vs_yolov8s")
     b, base = f.bench.get(("yolov8n", "lngn", 518)), f.bench.get(("yolov8n", "baseline", None))
-    if b and base:
-        items.append(f"Cost: {b['gflops_total']:.0f} vs {base['gflops_total']:.1f} GFLOPs ({b['gflops_total'] / base['gflops_total']:.0f}×); DINOv2 is {100 * b['gflops_dino'] / b['gflops_total']:.0f}% of the fused compute")
-    bullets(s, 0.6, 1.8, 7.6, 4.9, items, size=13, gap=10)
+    cost = f" at {b['gflops_total'] / base['gflops_total']:.0f}× YOLOv8n's GFLOPs" if b and base else ""
+    if cap:
+        items.append([("H3 cost — ", {"bold": True, "color": TEAL}), (f"LN+GN vs YOLOv8s: {ci_short(cap)}{cost}.", {})])
+    else:
+        items.append([("H3 cost — open. ", {"bold": True, "color": TEAL}), (f"Fusion costs{cost or ' more'}; the YOLOv8s control is pending.", {})])
+    low = f.b("lowdata", "lngn")
+    if low and boot:
+        vis = f.b("visdrone", "lngn")
+        tail = f"; VisDrone {ci_short(vis)}" if vis else "; VisDrone pending"
+        items.append([("H4 regime — ", {"bold": True, "color": TEAL}), (f"gain {signed(low['delta_map'])} with 10% labels vs {signed(boot['delta_map'])} with 100%{tail}.", {})])
+    g = f.boot_nn.get("gated")
+    if g and excludes_zero(g):
+        items.append([("Extra — ", {"bold": True}), (f"the learnable per-channel gate is the only adapter change beyond noise ({signed(g['delta_map'], 2)} vs no norm).", {})])
+    bullets(s, 0.6, 1.8, 7.6, 4.9, items, size=12.5, gap=10)
     label_box(
         s, 8.5, 1.8, 4.25, 4.95, "Limitations",
         [
@@ -571,26 +734,27 @@ def slide_conclusion(prs, f: Facts):
 
 
 def slide_backup(prs, f: Facts):
-    s = new_slide(prs, 16, "Backup", "Reproducibility and anticipated questions")
+    s = new_slide(prs, "Backup", "Reproducibility and anticipated questions")
     rows = [
         ["Command", "What it does"],
         ["python -m tools.prepare_data", "VOC download + fixed splits"],
-        ["python -m pytest tests", "13 tests: offsets, zero-init equality, pickling, gradients"],
-        ["python -m tools.run_queue", "every run, resumable"],
-        ["python -m tools.analyze", "tables, figures, bootstrap CIs"],
+        ["python -m pytest tests", "17 tests: offsets, zero-init equality, pickling, resume, gradients, error types"],
+        ["python -m tools.run_queue", "every run, resumable (laptop)"],
+        ["tools.kaggle_worker", "same runs on Kaggle GPUs, one per GPU"],
+        ["python -m tools.analyze", "tables, figures, bootstrap CIs, error analysis"],
         ["python -m tools.make_slides", "this deck"],
     ]
     table(s, 0.6, 1.8, 6.3, rows, [2.7, 3.6], size=11, row_h=0.42)
-    text(s, 0.6, 4.55, 6.3, 1.2, "Each run keeps its dev curve, diagnostics.jsonl, best.pt and per-image test matches, so every number in this deck can be regenerated.", size=12, color=GREY)
+    text(s, 0.6, 4.95, 6.3, 1.2, "Each run keeps its dev curve, diagnostics.jsonl, best.pt and per-image test matches, so every number in this deck can be regenerated.", size=12, color=GREY)
     label_box(
         s, 7.1, 1.8, 5.65, 3.6, "Likely questions",
         [
-            "• Why LN+GN, not BatchNorm? → slide 7 + GN is batch-size independent",
-            "• Bigger than seed noise? → slide 8 CIs",
-            "• Worth the latency? → slide 12, YOLOv8s control",
-            "• Did copied filters read the right channels? → slide 5, unit test",
-            "• Beyond VOC? → slide 13",
-            "• Different from the IUI work? → new: isolation, fixes, multi-seed, mechanism, cost",
+            "• Why LN+GN, not BatchNorm? → 'Why normalization could matter'",
+            "• Bigger than seed noise? → 'Main result' CIs + equivalence test",
+            "• Worth the compute? → 'Cost', YOLOv8s control",
+            "• Did copied filters read the right channels? → 'Method', unit test",
+            "• What does DINOv2 actually fix? → 'Error analysis', 'Controls'",
+            "• Beyond VOC? → 'Generalization'",
         ],
         body_size=12,
     )
@@ -631,24 +795,31 @@ def main() -> None:
     f = Facts(summary)
     prs = Presentation()
     prs.slide_width, prs.slide_height = Inches(13.333), Inches(7.5)
-    for build in (
+    builders = (
         slide_title,
         slide_problem,
         slide_question,
         slide_related,
         slide_method,
         slide_protocol,
+        slide_experiments,
         slide_statistics,
         slide_main,
         slide_mechanism,
+        slide_controls,
         slide_curves,
         slide_where,
+        slide_errors,
         slide_cost,
         slide_regimes,
         slide_qualitative,
+        slide_threats,
         slide_conclusion,
         slide_backup,
-    ):
+    )
+    global TOTAL
+    TOTAL = len(builders)
+    for build in builders:
         build(prs, f)
     OUT.parent.mkdir(parents=True, exist_ok=True)
     try:

@@ -108,6 +108,7 @@ def paired_delta(boot: dict[str, dict], pairs: list[tuple[str, str]]) -> dict:
     point = np.mean([boot[b]["point"] - boot[a]["point"] for a, b in pairs], axis=0)
     reps = np.mean([boot[b]["boot"] - boot[a]["boot"] for a, b in pairs], axis=0)
     lo, hi = np.percentile(reps, [2.5, 97.5], axis=0)
+    lo90, hi90 = np.percentile(reps[:, 1], [5, 95])
     return {
         "n_pairs": len(pairs),
         "n_boot": len(reps),
@@ -115,7 +116,9 @@ def paired_delta(boot: dict[str, dict], pairs: list[tuple[str, str]]) -> dict:
         "delta_map": float(point[1]),
         "ci_map50": [float(lo[0]), float(hi[0])],
         "ci_map": [float(lo[1]), float(hi[1])],
+        "ci90_map": [float(lo90), float(hi90)],  # for equivalence (TOST) at alpha = 0.05
         "p_le_zero_map": float((reps[:, 1] <= 0).mean()),
+        "p_two_sided_map": float(min(1.0, 2 * min((reps[:, 1] <= 0).mean(), (reps[:, 1] >= 0).mean()))),
     }
 
 

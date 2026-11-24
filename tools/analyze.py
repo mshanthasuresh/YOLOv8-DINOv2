@@ -20,7 +20,8 @@ import numpy as np
 import pandas as pd
 
 from nafuse import RESULTS_ROOT
-from nafuse.specs import ALL_ARMS, DEFAULT_RES
+from nafuse.errors import ERRORS, OPERATING_CONF, decompose
+from nafuse.specs import ALL_ARMS, CONTROL_ARMS, DEFAULT_RES, FUSION_ARMS
 from nafuse.stats import bootstrap_maps, load_results, mean_std, paired_delta
 from tools import qualitative
 
@@ -33,8 +34,20 @@ COLORS = {
     "lngn": "#007B73",
     "gated": "#E85E48",
     "yolov8s": "#152E2A",
+    "global": "#7CC6BE",
+    "gatedlow": "#F29E8E",
 }
-SHORT = {"baseline": "Baseline", "nonorm": "No norm", "ln": "LN only", "gn": "GN only", "lngn": "LN+GN", "gated": "Gated"}
+SHORT = {
+    "baseline": "Baseline",
+    "nonorm": "No norm",
+    "ln": "LN only",
+    "gn": "GN only",
+    "lngn": "LN+GN",
+    "gated": "Gated",
+    "global": "Global DINO",
+    "gatedlow": "Gated, low init",
+}
+EQUIV_MARGIN = 0.005  # ±0.5 mAP50-95 points, about the seed-to-seed sd of the baseline
 METRICS = [
     "test_map",
     "test_map50",
@@ -347,35 +360,122 @@ def fig_data_regimes(regimes: list[tuple[str, dict]]) -> str | None:
     return _save(fig, "data_regimes")
 
 
+def _seeds(df: pd.DataFrame, group: str, arm: str, model: str = "yolov8n", res: int = DEFAULT_RES) -> dict:
+    rows = df[(df["group"] == group) & (df["arm"] == arm) & (df["model"] == model) & (df["dino_res"] == res)]
+    return {r.seed: r.records for r in rows.itertuples() if Path(r.records).exists()}
+
+
+def _family_tests(out: dict) -> None:
+    """Holm-adjusted p-values for the normalization family and a TOST-style equivalence verdict for every delta."""
+    family = sorted(out.get("main_vs_nonorm", {}).values(), key=lambda d: d["p_two_sided_map"])
+    running = 0.0
+    for i, d in enumerate(family):
+        running = max(running, min(1.0, (len(family) - i) * d["p_two_sided_map"]))
+        d["p_holm_map"] = running
+    for section in out.values():
+        for d in section.values():
+            d["equivalent"] = bool(-EQUIV_MARGIN < d["ci90_map"][0] and d["ci90_map"][1] < EQUIV_MARGIN)
+
+
 def run_bootstrap(df: pd.DataFrame, n_boot: int) -> dict:
-    out = {}
-    main = df[(df["group"] == "main") & (df["dataset"] == "voc") & (df["model"] == "yolov8n")]
-    low = df[df["group"] == "lowdata"]
-    vis = df[df["group"] == "visdrone"]
-    for name, sub, arms in (("main", main, [a for a in ALL_ARMS if a != "baseline"]), ("lowdata", low, ["lngn"])):
-        voc_paths = [p for p in sub["records"] if Path(p).exists()]
-        if not voc_paths:
-            continue
-        boot = bootstrap_maps(voc_paths, n_boot=n_boot)
-        base = {r.seed: r.records for r in sub[sub["arm"] == "baseline"].itertuples()}
-        for arm in arms:
-            pairs = [(base[r.seed], r.records) for r in sub[sub["arm"] == arm].itertuples() if r.seed in base]
+    """Seed-paired deltas; all runs scored on the same test images share one set of bootstrap replicates."""
+    out: dict = {}
+
+    def compare(sub: pd.DataFrame, comparisons: list[tuple[str, str, dict, dict]]) -> None:
+        paths = [p for p in sub["records"] if Path(p).exists()]
+        if not paths:
+            return
+        boot = bootstrap_maps(paths, n_boot=n_boot)
+        for section, key, ref, new in comparisons:
+            pairs = [(ref[s], new[s]) for s in sorted(ref) if s in new]
             if pairs:
-                out.setdefault(name, {})[arm] = paired_delta(boot, pairs)
-        nonorm = {r.seed: r.records for r in sub[sub["arm"] == "nonorm"].itertuples()}
-        for arm in ("ln", "gn", "lngn", "gated"):
-            pairs = [(nonorm[r.seed], r.records) for r in sub[sub["arm"] == arm].itertuples() if r.seed in nonorm]
-            if pairs:
-                out.setdefault(f"{name}_vs_nonorm", {})[arm] = paired_delta(boot, pairs)
-    if not vis.empty:
-        paths = [p for p in vis["records"] if Path(p).exists()]
-        if paths:
-            boot = bootstrap_maps(paths, n_boot=n_boot)
-            base = {r.seed: r.records for r in vis[vis["arm"] == "baseline"].itertuples()}
-            pairs = [(base[r.seed], r.records) for r in vis[vis["arm"] == "lngn"].itertuples() if r.seed in base]
-            if pairs:
-                out["visdrone"] = {"lngn": paired_delta(boot, pairs)}
+                out.setdefault(section, {})[key] = paired_delta(boot, pairs)
+
+    voc = df[df["dataset"].isin(["voc", "voc10"])]  # both are tested on VOC07 test
+    base, nonorm, lngn, gated = (_seeds(voc, "main", a) for a in ("baseline", "nonorm", "lngn", "gated"))
+    v8s = _seeds(voc, "capacity", "baseline", model="yolov8s")
+    global_, gatedlow = _seeds(voc, "control", "global"), _seeds(voc, "control", "gatedlow")
+    comparisons = [("main", a, base, _seeds(voc, "main", a)) for a in FUSION_ARMS]
+    comparisons += [("main_vs_nonorm", a, nonorm, _seeds(voc, "main", a)) for a in ("ln", "gn", "lngn", "gated")]
+    comparisons += [
+        ("lowdata", "lngn", _seeds(voc, "lowdata", "baseline"), _seeds(voc, "lowdata", "lngn")),
+        ("control", "global_vs_baseline", base, global_),
+        ("control", "spatial_vs_global", global_, lngn),
+        ("control", "gatedlow_vs_nonorm", nonorm, gatedlow),
+        ("control", "gated_vs_gatedlow", gatedlow, gated),
+        ("capacity", "yolov8s_vs_yolov8n", base, v8s),
+        ("capacity", "lngn518_vs_yolov8s", v8s, lngn),
+    ]
+    for res in (224, 336, 448):
+        sweep = _seeds(voc, "resolution", "lngn", res=res)
+        comparisons += [("resolution", str(res), base, sweep), ("capacity", f"lngn{res}_vs_yolov8s", v8s, sweep)]
+    compare(voc, comparisons)
+
+    vis = df[df["dataset"] == "visdrone"]
+    vb, vl, vn = (_seeds(vis, "visdrone", a) for a in ("baseline", "lngn", "nonorm"))
+    compare(vis, [("visdrone", "lngn", vb, vl), ("visdrone", "nonorm", vb, vn), ("visdrone_vs_nonorm", "lngn", vn, vl)])
+    _family_tests(out)
     return out
+
+
+def error_summary(df: pd.DataFrame) -> tuple[dict, str | None]:
+    voc = df[(df["dataset"] == "voc") & (df["model"] == "yolov8n") & (df["dino_res"] == DEFAULT_RES)]
+    out = {}
+    for arm in (*ALL_ARMS, *CONTROL_ARMS):
+        rows = [decompose(p) for p in voc[voc["arm"] == arm]["records"] if Path(p).exists()]
+        if not rows:
+            continue
+        dap = pd.DataFrame([r["dap50"] for r in rows])
+        out[arm] = {
+            "n": len(rows),
+            "ap50_mean": float(np.mean([r["ap50"] for r in rows])),
+            "dap50_mean": dap.mean().to_dict(),
+            "dap50_std": dap.std(ddof=1).fillna(0.0).to_dict(),
+            "counts_mean": pd.DataFrame([r["counts_at_conf"] for r in rows]).mean().to_dict(),
+        }
+    shown = [a for a in ("baseline", "global", "lngn") if a in out]
+    if len(shown) < 2:
+        return out, None
+    names = {"cls": "wrong class", "loc": "poor box", "both": "class + box", "dupe": "duplicate", "bkg": "background", "miss": "missed"}
+    fig, axes = plt.subplots(1, 2, figsize=(10.5, 3.8), gridspec_kw={"width_ratios": [1.2, 1]})
+    width = 0.8 / len(shown)
+    for j, arm in enumerate(shown):
+        offset = (j - (len(shown) - 1) / 2) * width
+        mean = [100 * out[arm]["dap50_mean"][e] for e in ERRORS]
+        std = [100 * out[arm]["dap50_std"][e] for e in ERRORS]
+        axes[0].barh(np.arange(len(ERRORS)) + offset, mean, width, xerr=std, color=COLORS[arm], label=SHORT[arm], capsize=2)
+        counts = out[arm]["counts_mean"]
+        kinds = ("cls", "loc", "bkg", "missed")
+        axes[1].bar(np.arange(len(kinds)) + offset, [counts[k] for k in kinds], width, color=COLORS[arm], label=SHORT[arm])
+    axes[0].set_yticks(range(len(ERRORS)), [names[e] for e in ERRORS])
+    axes[0].invert_yaxis()
+    axes[0].set_xlabel("AP50 points recovered by an oracle fix (dAP)")
+    axes[0].set_title("Which errors cost AP? (TIDE-style, VOC07 test)")
+    axes[0].legend(frameon=False, fontsize=8)
+    axes[1].set_xticks(range(4), ["wrong class", "poor box", "background", "missed"])
+    axes[1].set_ylabel("detections / objects (mean over seeds)")
+    axes[1].set_title(f"Error counts at conf ≥ {OPERATING_CONF}")
+    return out, _save(fig, "error_types")
+
+
+def fig_controls(df: pd.DataFrame, table: dict) -> tuple[dict, str | None]:
+    control = _arm_table(df[(df["group"] == "control") & (df["dataset"] == "voc")])
+    rows = [(a, control if a in CONTROL_ARMS else table) for a in ("baseline", "global", "lngn", "nonorm", "gatedlow", "gated")]
+    rows = [(a, t[a]) for a, t in rows if a in t]
+    if not control or len(rows) < 2:
+        return control, None
+    fig, ax = plt.subplots(figsize=(7.6, 3.6))
+    for i, (arm, t) in enumerate(rows):
+        mean, std = 100 * t["test_map_mean"], 100 * (t["test_map_std"] or 0)
+        ax.bar(i, mean, 0.65, color=COLORS[arm], alpha=0.9)
+        ax.errorbar(i, mean, yerr=std, color="black", capsize=4, lw=1)
+        ax.text(i, mean + std + 0.3, f"{mean:.1f}\n(n={t['n']})", ha="center", va="bottom", fontsize=8)
+    values = [100 * t["test_map_mean"] for _, t in rows]
+    ax.set_ylim(min(values) - 5, max(values) + 3)
+    ax.set_xticks(range(len(rows)), [SHORT[a] for a, _ in rows], fontsize=9)
+    ax.set_ylabel("VOC07 test mAP50-95 (%)")
+    ax.set_title("Controls: spatial layout vs global vector, gate vs init scale")
+    return control, _save(fig, "controls")
 
 
 def main() -> None:
@@ -417,6 +517,11 @@ def main() -> None:
     low_t, _ = pair_summary(df, "voc10", "VOC 10% labels")
     vis_t, _ = pair_summary(df, "visdrone", "VisDrone (aerial)")
     summary["lowdata"], summary["visdrone"] = low_t, vis_t
+    summary["visdrone_all"] = _arm_table(df[df["dataset"] == "visdrone"])
+    summary["capacity"] = _arm_table(df[df["group"] == "capacity"])
+    summary["control"], summary["figures"]["controls"] = fig_controls(df, table)
+    summary["errors"], summary["figures"]["error_types"] = error_summary(df)
+    summary["equivalence_margin"] = EQUIV_MARGIN
     summary["figures"]["data_regimes"] = fig_data_regimes(
         [("VOC 100%", full_t), ("VOC 10%", low_t), ("VisDrone", vis_t)]
     )
