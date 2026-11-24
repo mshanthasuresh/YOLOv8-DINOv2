@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass, field
 
 FUSION_ARMS = ("nonorm", "ln", "gn", "lngn", "gated")
 ALL_ARMS = ("baseline", *FUSION_ARMS)
+CONTROL_ARMS = ("global", "gatedlow")
 DEFAULT_RES = 518
 MAIN_EPOCHS = 15
 LOW_DATA_EPOCHS = 30
@@ -66,4 +67,11 @@ def experiment_matrix(
     # P6: extra seeds where time allows.
     runs += [RunSpec("lngn", 1, group="resolution", dino_res=r, epochs=epochs, priority=6) for r in (224, 336, 448)]
     runs += [RunSpec("baseline", s, group="capacity", model="yolov8s", epochs=epochs, priority=6) for s in (1, 2)]
+    # P7: what part of DINOv2 helps (spatial layout vs global vector) and why "gated" wins (gate vs projector init).
+    for s in seeds:
+        runs += [RunSpec(a, s, group="control", epochs=epochs, priority=7) for a in CONTROL_ARMS]
+    # P8: does "normalization does not matter" hold on the second domain?
+    runs += [
+        RunSpec("nonorm", s, group="visdrone", dataset="visdrone", epochs=visdrone_epochs, priority=8) for s in (0, 1)
+    ]
     return runs

@@ -18,6 +18,9 @@ ARMS: dict[str, dict] = {
     "lngn": {"token_norm": True, "out_norm": True, "gated": False},
     # Historical IUI variant, reproduced as-is: no normalization, per-channel sigmoid gate, std-0.02 projector.
     "gated": {"token_norm": False, "out_norm": False, "gated": True},
+    # Controls: "lngn" fed the image-mean DINO token (no spatial layout); "gated" with the std-0.005 projector.
+    "global": {"token_norm": True, "out_norm": True, "gated": False, "pool": True},
+    "gatedlow": {"token_norm": False, "out_norm": False, "gated": True, "proj_std": 0.005},
 }
 ARM_LABELS = {
     "baseline": "YOLOv8n baseline",
@@ -26,6 +29,8 @@ ARM_LABELS = {
     "gn": "Projected GroupNorm only",
     "lngn": "LayerNorm + GroupNorm (supplied)",
     "gated": "Gated fusion (historical)",
+    "global": "LN+GN, global DINO vector (control)",
+    "gatedlow": "Gated, std-0.005 projector (control)",
 }
 
 
@@ -80,8 +85,9 @@ class FusionAdapter(nn.Module):
         dim = self.dino.embed_dim
         self.out_channels = out_channels
         self.gated = flags["gated"]
+        self.pool = flags.get("pool", False)
         self.scale = scale if scale is not None else (0.1 if self.gated else 0.05)
-        self.proj_std = proj_std if proj_std is not None else (0.02 if self.gated else 0.005)
+        self.proj_std = proj_std if proj_std is not None else flags.get("proj_std", 0.02 if self.gated else 0.005)
         self.gn_groups = gn_groups
         self.token_norm = nn.LayerNorm(dim) if flags["token_norm"] else None
         self.proj = nn.Conv2d(dim, out_channels, kernel_size=1)
@@ -107,6 +113,8 @@ class FusionAdapter(nn.Module):
 
     def forward(self, images: torch.Tensor, size: tuple[int, int]) -> torch.Tensor:
         tokens = self.dino.tokens(images).to(self.proj.weight.dtype)
+        if self.pool:
+            tokens = tokens.mean((2, 3), keepdim=True)
         if self.token_norm is not None:
             tokens = self.token_norm(tokens.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
         ctx = self.proj(tokens)
