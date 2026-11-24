@@ -446,8 +446,8 @@ def slide_experiments(prs, f: Facts):
     hours = sum(r.get("train_hours", 0) or 0 for r in runs)
     s = new_slide(prs, "Experiment map", "Depth: every claim has its own controlled experiment", f"{len(runs)} trained runs, {hours:.0f} GPU-hours. Every run: checkpoint picked on VOC07 val, scored once on the held-out test split.")
 
-    def n(**kw):
-        return sum(all(r.get(k) == v for k, v in kw.items()) for r in runs)
+    def n(group, arms=None):
+        return sum(r.get("group") == group and (arms is None or r.get("arm") in arms) for r in runs) or "queued"
 
     def ans(d, fmt=ci_short):
         return fmt(d) if d else "pending (Kaggle run)"
@@ -463,14 +463,14 @@ def slide_experiments(prs, f: Facts):
         norm = "no — LN/GN ≡ no norm (±0.5)" if f.h1_rejected() else "no significant difference"
     rows = [
         ["Question", "Experiment (one factor varies)", "Runs", "Answer (Δ mAP50-95, 95% CI)"],
-        ["Does fusion help?", "YOLOv8n vs LN+GN fusion, 3 seeds", n(group="main", arm="baseline") + n(group="main", arm="lngn"), ans(f.boot.get("lngn"))],
-        ["H1: does normalization matter?", "No norm / LN / GN / LN+GN / gated adapters", n(group="main") - n(group="main", arm="baseline"), norm],
-        ["Is it the spatial layout?", "LN+GN on the image-mean DINO token", n(group="control", arm="global"), ans(f.b("control", "spatial_vs_global"))],
-        ["Why does gating win?", "Gated arm with the small projector init", n(group="control", arm="gatedlow"), ans(f.b("control", "gated_vs_gatedlow"))],
-        ["H3: is it just compute?", "YOLOv8s baseline (3.5× YOLOv8n FLOPs)", n(group="capacity"), ans(f.b("capacity", "lngn518_vs_yolov8s"))],
-        ["How much ViT resolution?", "DINOv2 input 224 / 336 / 448 / 518 px", n(group="resolution"), res or "pending"],
-        ["H4: fewer labels?", "10% of VOC labels, baseline vs LN+GN", n(group="lowdata"), ans(f.b("lowdata", "lngn"))],
-        ["H4: another domain?", "VisDrone aerial: baseline / no norm / LN+GN", n(group="visdrone"), ans(f.b("visdrone", "lngn"))],
+        ["Does fusion help?", "YOLOv8n vs LN+GN fusion, 3 seeds each", n("main", ("baseline", "lngn")), ans(f.boot.get("lngn"))],
+        ["H1: does normalization matter?", "No norm / LN / GN / LN+GN / gated adapters", n("main", ("nonorm", "ln", "gn", "lngn", "gated")), norm],
+        ["Is it the spatial layout?", "LN+GN on the image-mean DINO token", n("control", ("global",)), ans(f.b("control", "spatial_vs_global"))],
+        ["Why does gating win?", "Gated arm with the small projector init", n("control", ("gatedlow",)), ans(f.b("control", "gated_vs_gatedlow"))],
+        ["H3: is it just compute?", "YOLOv8s baseline (3.5× YOLOv8n FLOPs)", n("capacity"), ans(f.b("capacity", "lngn518_vs_yolov8s"))],
+        ["How much ViT resolution?", "DINOv2 input 224 / 336 / 448 / 518 px", n("resolution"), res or "pending"],
+        ["H4: fewer labels?", "10% of VOC labels, baseline vs LN+GN", n("lowdata"), ans(f.b("lowdata", "lngn"))],
+        ["H4: another domain?", "VisDrone aerial: baseline / no norm / LN+GN", n("visdrone"), ans(f.b("visdrone", "lngn"))],
         ["Which errors are fixed?", "TIDE-style AP50 error decomposition", "analysis", err],
         ["How is DINO used in training?", "DINO share, feature & gradient ratios / 50 it", "analysis", mech],
     ]
