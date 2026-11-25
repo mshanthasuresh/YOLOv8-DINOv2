@@ -467,7 +467,7 @@ def slide_experiments(prs, f: Facts):
         ["H1: does normalization matter?", "No norm / LN / GN / LN+GN / gated adapters", n("main", ("nonorm", "ln", "gn", "lngn", "gated")), norm],
         ["Is it the spatial layout?", "LN+GN on the image-mean DINO token", n("control", ("global",)), ans(f.b("control", "spatial_vs_global"))],
         ["Why does gating win?", "Gated arm with the small projector init", n("control", ("gatedlow",)), ans(f.b("control", "gated_vs_gatedlow"))],
-        ["H3: is it just compute?", "YOLOv8s baseline (3.5× YOLOv8n FLOPs)", n("capacity"), ans(f.b("capacity", "lngn518_vs_yolov8s"))],
+        ["H3: is it just compute?", "YOLOv8s baseline (3.5× YOLOv8n FLOPs)", n("capacity"), ans(f.b("capacity", "lngn224_vs_yolov8s"), lambda d: f"no: fusion @224 px beats it, {ci_short(d)}")],
         ["How much ViT resolution?", "DINOv2 input 224 / 336 / 448 / 518 px", n("resolution"), res or "pending"],
         ["H4: fewer labels?", "10% of VOC labels, baseline vs LN+GN", n("lowdata"), ans(f.b("lowdata", "lngn"))],
         ["H4: another domain?", "VisDrone aerial: baseline / no norm / LN+GN", n("visdrone"), ans(f.b("visdrone", "lngn"))],
@@ -635,6 +635,10 @@ def slide_cost(prs, f: Facts):
         v8s, fused = points["YOLOv8s"], points["LN+GN @518"]
         better = fused["test_map_mean"] > v8s["test_map_mean"]
         items.append(f"Bigger CNN control: YOLOv8s {pct(v8s['test_map_mean'])} vs fused {pct(fused['test_map_mean'])} mAP50-95 — " + ("fusion wins on accuracy" if better else "the bigger CNN wins"))
+    d224 = f.b("capacity", "lngn224_vs_yolov8s")
+    if d224 and "LN+GN @224" in points and "YOLOv8s" in points and points["LN+GN @224"]["gflops"]:
+        p224, v8s = points["LN+GN @224"], points["YOLOv8s"]
+        items.append(f"Cost-matched: LN+GN @224 needs {p224['gflops']:.0f} vs {v8s['gflops']:.0f} GFLOPs and {p224['ms_per_image_batched']:.1f} vs {v8s['ms_per_image_batched']:.1f} ms/img, yet scores {ci_short(d224)} mAP50-95 more than YOLOv8s")
     res = sorted((p for p in points.values() if p["label"].startswith("LN+GN @")), key=lambda p: p["gflops"] or 0)
     if len(res) > 1:
         items.append("DINO resolution sweep: " + ", ".join(f"{p['label'][7:]}: {pct(p['test_map_mean'])}" for p in res))
@@ -703,10 +707,13 @@ def slide_conclusion(prs, f: Facts):
     boot = f.boot.get("lngn")
     if boot:
         items.append([("H2 fusion — " + ("supported. " if excludes_zero(boot) else "not supported. "), {"bold": True, "color": TEAL}), (f.delta_sentence("lngn"), {})])
-    cap = f.b("capacity", "lngn518_vs_yolov8s")
+    cap, cap224 = f.b("capacity", "lngn518_vs_yolov8s"), f.b("capacity", "lngn224_vs_yolov8s")
     b, base = f.bench.get(("yolov8n", "lngn", 518)), f.bench.get(("yolov8n", "baseline", None))
     cost = f" at {b['gflops_total'] / base['gflops_total']:.0f}× YOLOv8n's GFLOPs" if b and base else ""
-    if cap:
+    if cap and cap224:
+        verdict = "supported. " if excludes_zero(cap224) and cap224["delta_map"] > 0 else "not supported. "
+        items.append([("H3 cost — " + verdict, {"bold": True, "color": TEAL}), (f"vs the bigger YOLOv8s: {ci_short(cap)} at 518 px; {ci_short(cap224)} at 224 px, where fusion needs fewer FLOPs than YOLOv8s.", {})])
+    elif cap:
         items.append([("H3 cost — ", {"bold": True, "color": TEAL}), (f"LN+GN vs YOLOv8s: {ci_short(cap)}{cost}.", {})])
     else:
         items.append([("H3 cost — open. ", {"bold": True, "color": TEAL}), (f"Fusion costs{cost or ' more'}; the YOLOv8s control is pending.", {})])
@@ -714,7 +721,9 @@ def slide_conclusion(prs, f: Facts):
     if low and boot:
         vis = f.b("visdrone", "lngn")
         tail = f"; VisDrone {ci_short(vis)}" if vis else "; VisDrone pending"
-        items.append([("H4 regime — ", {"bold": True, "color": TEAL}), (f"gain {signed(low['delta_map'])} with 10% labels vs {signed(boot['delta_map'])} with 100%{tail}.", {})])
+        grows = low["delta_map"] > boot["delta_map"]
+        verdict = ("supported. " if grows and vis["delta_map"] < boot["delta_map"] else "partly supported. ") if vis else ""
+        items.append([("H4 regime — " + verdict, {"bold": True, "color": TEAL}), (f"gain {signed(low['delta_map'])} with 10% labels vs {signed(boot['delta_map'])} with 100%{tail}.", {})])
     g = f.boot_nn.get("gated")
     if g and excludes_zero(g):
         items.append([("Extra — ", {"bold": True}), (f"the learnable per-channel gate is the only adapter change beyond noise ({signed(g['delta_map'], 2)} vs no norm).", {})])

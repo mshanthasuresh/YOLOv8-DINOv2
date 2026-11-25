@@ -18,6 +18,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.ticker import FuncFormatter, NullFormatter
 
 from nafuse import RESULTS_ROOT
 from nafuse.errors import ERRORS, OPERATING_CONF, decompose
@@ -316,17 +317,22 @@ def resolution_summary(df: pd.DataFrame, bench: dict | None, table: dict) -> tup
     if len(plotted) < 2:
         return points, None
     fig, axes = plt.subplots(1, 2, figsize=(9.5, 3.6))
-    for ax, key, xlabel in (
-        (axes[0], "gflops", "GFLOPs per 640² image (incl. DINOv2)"),
-        (axes[1], "ms_per_image_batched", "GPU ms / image (batch 32, FP16, RTX A3000)"),
+    for ax, key, xlabel, ticks in (
+        (axes[0], "gflops", "GFLOPs per 640² image (incl. DINOv2)", (8, 10, 20, 30, 50, 100)),
+        (axes[1], "ms_per_image_batched", "GPU ms / image (batch 32, FP16, RTX A3000)", (1.5, 2, 3, 5, 10)),
     ):
         for p in plotted:
             ax.errorbar(p[key], 100 * p["test_map_mean"], yerr=100 * p["test_map_std"], fmt="o", color=p["color"], capsize=3)
-            ax.annotate(p["label"], (p[key], 100 * p["test_map_mean"]), textcoords="offset points", xytext=(5, 4), fontsize=8)
+            text = p["label"] if p["label"] in ("YOLOv8n", "YOLOv8s", "LN+GN @224") else p["label"].replace("LN+GN ", "")
+            offset, ha = {"@336": ((-5, 4), "right"), "@448": ((0, -15), "center")}.get(text, ((5, 4), "left"))  # neighbours sit close on the log axis
+            ax.annotate(text + (" px" if "@" in text else ""), (p[key], 100 * p["test_map_mean"]), textcoords="offset points", xytext=offset, ha=ha, fontsize=8)
         lngn = sorted([p for p in plotted if p["label"].startswith("LN+GN")], key=lambda p: p[key])
         if len(lngn) > 1:
             ax.plot([p[key] for p in lngn], [100 * p["test_map_mean"] for p in lngn], color=COLORS["lngn"], lw=1, alpha=0.6)
         ax.set_xscale("log")
+        ax.set_xticks(ticks)
+        ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}"))
+        ax.xaxis.set_minor_formatter(NullFormatter())
         ax.set_xlabel(xlabel)
         ax.set_ylabel("test mAP50-95 (%)")
     axes[0].set_title("Accuracy vs compute")
