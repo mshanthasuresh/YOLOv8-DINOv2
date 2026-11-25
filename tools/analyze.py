@@ -197,9 +197,9 @@ def diagnostics_summary(main: pd.DataFrame) -> tuple[dict, str | None]:
     return summary, path
 
 
-def fig_dev_curves(main: pd.DataFrame) -> str | None:
+def fig_dev_curves(main: pd.DataFrame) -> tuple[dict, str | None]:
     fig, ax = plt.subplots(figsize=(6.4, 3.6))
-    drawn = False
+    means = {}
     for arm in ALL_ARMS:
         curves = [c for c in main[main["arm"] == arm]["dev_curve"] if isinstance(c, list) and c]
         if not curves:
@@ -207,18 +207,22 @@ def fig_dev_curves(main: pd.DataFrame) -> str | None:
         n = min(len(c) for c in curves)
         arr = 100 * np.array([c[:n] for c in curves])
         x = np.arange(1, n + 1)
+        means[arm] = arr.mean(0) / 100
         ax.plot(x, arr.mean(0), color=COLORS[arm], label=SHORT[arm], lw=1.8)
         if len(curves) > 1:
             ax.fill_between(x, arr.min(0), arr.max(0), color=COLORS[arm], alpha=0.12)
-        drawn = True
-    if not drawn:
+    if not means:
         plt.close(fig)
-        return None
+        return {}, None
+    gap = {}
+    if "baseline" in means and "lngn" in means:
+        n = min(len(means["baseline"]), len(means["lngn"]))
+        gap = {e + 1: float(means["lngn"][e] - means["baseline"][e]) for e in range(n)}
     ax.set_xlabel("epoch")
     ax.set_ylabel("dev (VOC07 val) mAP50-95 (%)")
     ax.set_title("Learning curves on the selection split")
     ax.legend(frameon=False, fontsize=8, ncol=2)
-    return _save(fig, "dev_curves")
+    return gap, _save(fig, "dev_curves")
 
 
 def fig_size_bins(table: dict) -> str | None:
@@ -514,7 +518,7 @@ def main() -> None:
     table = _arm_table(main_df)
     summary["main"] = table
     summary["figures"]["main_map"] = fig_main(main_df, table)
-    summary["figures"]["dev_curves"] = fig_dev_curves(main_df)
+    summary["dev_gap_lngn"], summary["figures"]["dev_curves"] = fig_dev_curves(main_df)
     summary["figures"]["size_bins"] = fig_size_bins(table)
     summary["diagnostics"], summary["figures"]["diagnostics"] = diagnostics_summary(main_df)
     summary["per_class_delta"], summary["figures"]["per_class_delta"] = fig_per_class(main_df)
