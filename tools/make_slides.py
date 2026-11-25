@@ -22,6 +22,7 @@ from pptx.util import Inches, Pt
 from nafuse import PROJECT_ROOT, RESULTS_ROOT
 
 OUT = PROJECT_ROOT / "deliverables" / "Final_Presentation_NormFusion.pptx"
+SCRIPT = PROJECT_ROOT / "deliverables" / "Speaker_Script.md"
 FONT = "Segoe UI"
 INK = RGBColor(0x15, 0x2E, 0x2A)
 TEAL = RGBColor(0x00, 0x7B, 0x73)
@@ -321,7 +322,7 @@ def slide_title(prs, f: Facts):
     cost = f"{b['gflops_total'] / base['gflops_total']:.0f}×" if b and base else "pending"
     callout(slide, 8.95, 4.8, 3.95, 1.7, cost, "compute of the fused model vs YOLOv8n (GFLOPs at 640², incl. DINOv2 @518)", fill=RGBColor(0x29, 0x4A, 0x43))
     notes(slide, f"""
-[0:20] Good evening. At the midterm you asked me why LayerNorm plus GroupNorm, and I did not have a good answer. So I made that the research question.
+Good evening. At the midterm you asked me why LayerNorm plus GroupNorm, and I did not have a good answer. So I made that the research question.
 I ran {runs} controlled training runs to answer it. Short answer: fusion adds {f.d('main', 'lngn')} mAP50-95 points, but the normalization does not explain it — the spatial DINOv2 features do.
 """)
 
@@ -349,7 +350,7 @@ def slide_problem(prs, f: Facts):
     )
     text(s, 0.6, 4.45, 6.3, 1.6, [[("Hypothesis, not a result. ", {"bold": True, "color": CORAL}), ("This project re-runs the comparison so that each factor is isolated, every claim has seeds and confidence intervals, and cost is measured on the same hardware.", {})]], size=13)
     notes(s, """
-[0:40] This is what I showed at the midterm: one seed, ten epochs, and the test set also picked the checkpoint.
+This is what I showed at the midterm: one seed, ten epochs, and the test set also picked the checkpoint.
 Token type, gate, normalization and initialization all changed at once, so the jump could not be attributed to anything.
 While re-running I also found a weight-transfer bug: the pretrained neck filters were reading shifted channels. Fixing it is part of this work.
 So I treated the midterm number as a hypothesis, not a result.
@@ -371,7 +372,7 @@ def slide_question(prs, f: Facts):
         label_box(s, x, 3.15, 2.9, 2.15, h, body, fill=MINT if i % 2 == 0 else SAND, title_color=TEAL if i % 2 == 0 else CORAL, body_size=12)
     text(s, 0.6, 5.55, 12.1, 1.3, [[("What would count as a negative result: ", {"bold": True}), ("no arm separates from no-norm (H1 rejected), or the fusion gain is inside the 95% CI of zero, or a 3.5× cheaper CNN gives the same accuracy. Each is reported as-is.", {})]], size=13, color=GREY)
     notes(s, """
-[0:30] The question: does explicit normalization, rather than fusion itself, explain a stable gain — and is the gain worth a ViT's cost?
+The question: does explicit normalization, rather than fusion itself, explain a stable gain — and is the gain worth a ViT's cost?
 Four hypotheses, each with a pre-declared way to fail: H1 normalization, H2 fusion, H3 cost against a bigger CNN, H4 fewer labels and a far domain.
 """)
 
@@ -421,7 +422,7 @@ def slide_method(prs, f: Facts):
     label_box(s, 4.8, 4.85, 3.9, 2.0, "Fix 1 — channel-correct transfer", "P5 keeps its channels first; DINO channels are appended. Pretrained filters of the two consuming convs are copied at their exact offsets (L12: 256|64|128, L21: 128|256|64).", fill=SAND, title_color=CORAL, body_size=12)
     label_box(s, 8.9, 4.85, 3.85, 2.0, "Fix 2 — function-preserving init", "DINO input columns start at zero ⇒ the untrained fused model is the baseline. Unit test: max |Δ output| = 0 for all five arms.", body_size=12)
     notes(s, """
-[0:50] Frozen DINOv2 ViT-S/14 patch tokens are projected to 64 channels and concatenated to YOLOv8n's P5 features right after SPPF.
+Frozen DINOv2 ViT-S/14 patch tokens are projected to 64 channels and concatenated to YOLOv8n's P5 features right after SPPF.
 The five arms change exactly one thing each: no norm, LayerNorm only, GroupNorm only, both, and the old gated design. Two controls come later.
 Two fixes make the comparison fair: channel-correct weight transfer, and zero-initialized DINO columns — so at step zero every fused model is exactly the baseline.
 A unit test checks that the output difference is zero. DINOv2 is never trained and never stored in the checkpoint.
@@ -454,7 +455,11 @@ def slide_protocol(prs, f: Facts):
         size=11.5,
         gap=4,
     )
-    notes(s, "[Backup] Use if asked about splits, seeds or the metric. mAP50-95 = AP averaged over IoU 0.50–0.95 (COCO style), per class, then over the 20 classes. VOC07 val picks the checkpoint; VOC07 test is scored once per run.")
+    notes(s, """
+Same data, schedule and starting weights for every arm. I train on 14,041 VOC images, choose the best epoch on the 2,510-image validation split, and score each model once on the 4,952-image test split.
+The metric is mAP50-95: detection accuracy averaged over box-overlap thresholds from 0.5 to 0.95.
+Every arm is trained with three seeds, and every difference I quote has a seed-paired bootstrap confidence interval.
+""")
 
 
 def slide_experiments(prs, f: Facts):
@@ -497,8 +502,8 @@ def slide_experiments(prs, f: Facts):
     ]
     table(s, 0.6, 2.0, 12.15, rows, [2.75, 4.5, 0.8, 4.1], size=10.5, row_h=0.43)
     notes(s, f"""
-[0:45] This is the depth of the study on one slide: {len(runs)} runs, {hours:.0f} GPU-hours, and each row is a separate controlled question with its own runs.
-Every run picks its checkpoint on VOC07 val and is scored once on the 4,952-image VOC07 test set. Every difference I quote has a seed-paired image-bootstrap 95% CI.
+This is the depth of the study on one slide: {len(runs)} runs, {hours:.0f} GPU-hours, and each row is a separate controlled question with its own runs.
+Each row comes back later in the talk with its own figure and confidence interval.
 The rest of the talk walks down the answer column.
 """)
 
@@ -522,7 +527,7 @@ def slide_statistics(prs, f: Facts):
     if t:
         r = t["init_ctx_over_p5_rms"]
         notes(s, f"""
-[0:40] This is the intuition behind LN+GN. DINO tokens have RMS {t['dino_post_norm_rms']:.1f}; YOLO's P5 only {t['yolo_p5_rms_mean']:.2f} — about {t['dino_post_norm_rms'] / t['yolo_p5_rms_mean']:.0f}× larger.
+This is the intuition behind LN+GN. DINO tokens have RMS {t['dino_post_norm_rms']:.1f}; YOLO's P5 only {t['yolo_p5_rms_mean']:.2f} — about {t['dino_post_norm_rms'] / t['yolo_p5_rms_mean']:.0f}× larger.
 Depending on the normalization, the injected context starts between {r['ln']:.3f}× and {r['lngn']:.3f}× of P5 — a {r['lngn'] / r['ln']:.0f}× spread. ViT-S/14 has no outlier tokens, so the 'registers' argument does not apply here.
 So the testable prediction is: if scale matters, these arms must end at different accuracies.
 """)
@@ -547,7 +552,7 @@ def slide_main(prs, f: Facts):
     bullets(s, 8.05, 1.95 + 0.36 * len(rows), 4.7, 2.6, [l for l in lines if l], size=11)
     g = f.boot_nn.get("gated") or {}
     notes(s, f"""
-[1:00] Held-out test, three seeds each: YOLOv8n {pct(f.mean('baseline'))}, LN+GN {pct(f.mean('lngn'))} — a gain of {f.d('main', 'lngn')} points, 95% CI {f.ci('main', 'lngn')}.
+Held-out test, three seeds each: YOLOv8n {pct(f.mean('baseline'))}, LN+GN {pct(f.mean('lngn'))} — a gain of {f.d('main', 'lngn')} points, 95% CI {f.ci('main', 'lngn')}.
 Now H1: the four adapter variants land within a few tenths of each other. I don't just say 'not significant' — I test equivalence: the 90% CIs of LN, GN and LN+GN against no norm all lie inside ±0.5 points.
 The only different variant is the gated one: {f.d('main_vs_nonorm', 'gated', 2)} over no norm, Holm-corrected p {p_text(g) if g else '?'}.
 """)
@@ -569,7 +574,7 @@ def slide_mechanism(prs, f: Facts):
     text(s, 8.85, 5.75, 3.95, 1.2, "DINO share = RMS of the conv response to DINO channels ÷ (DINO + YOLO responses). It starts at exactly 0 (zero-init).", size=10, color=GREY)
     if len(shares) > 1 and len(maps) > 1:
         notes(s, f"""
-[0:40] Why doesn't a 10× scale difference matter? Every 50 iterations I logged how much of the first neck convolution's response comes from DINO channels.
+Why doesn't a 10× scale difference matter? Every 50 iterations I logged how much of the first neck convolution's response comes from DINO channels.
 It starts at zero by construction and ends between {min(shares):.2f} and {max(shares):.2f} depending on the arm — {max(shares) / min(shares):.1f}× apart — yet accuracy differs by only {100 * (max(maps) - min(maps)):.2f} points.
 The network rescales the context itself, so normalization only changes the starting point.
 """)
@@ -597,7 +602,7 @@ def slide_controls(prs, f: Facts):
     bullets(s, 8.25, 1.95, 4.5, 4.9, items, size=11.5, gap=10)
     text(s, 0.6, 6.0, 7.4, 0.9, "Global control: the same LN+GN adapter, but the 37×37 token map is averaged to one vector and broadcast — same channels, same GN-fixed scale, no spatial layout.", size=10.5, color=GREY)
     notes(s, f"""
-[0:55] Two controls answer the 'why'. First: spatial layout, or just global scene information? Same LN+GN adapter, but the token map is averaged to one vector.
+Two controls answer the 'why'. First: spatial layout, or just global scene information? Same LN+GN adapter, but the token map is averaged to one vector.
 That gives {f.d('control', 'global_vs_baseline')} over the baseline; the spatial map adds {f.d('control', 'spatial_vs_global')} more — so most of the gain needs the layout.
 Second: the gated design differs from no norm in two ways, a learnable gate and a 4× larger projector init. With the small init the gate alone gives {f.d('control', 'gatedlow_vs_nonorm', 2)}; the larger init adds {f.d('control', 'gated_vs_gatedlow', 2)}. Both contribute.
 """)
@@ -620,7 +625,11 @@ def slide_curves(prs, f: Facts):
     if be_b and be_l:
         items.append(f"Same 15-epoch budget for every arm; best dev epoch: YOLOv8n {be_b:.0f}, LN+GN {be_l:.0f}.")
     bullets(s, 8.5, 1.9, 4.3, 4.5, items, size=12)
-    notes(s, "[Backup] Use if asked 'is it just faster convergence?'. Answer honestly with the gap numbers on the right; the YOLOv8s control had the same budget.")
+    if len(gap) > 2:
+        notes(s, f"""
+One honest check: is the gain just faster learning? On the validation split the gap between LN+GN and YOLOv8n shrinks from {signed(gap[eps[0]])} points at epoch 1 to {signed(gap[eps[-1]])} at epoch {eps[-1]}, and it is still shrinking.
+So part of the gain is faster convergence, and a much longer schedule may narrow it. Every arm, and the YOLOv8s control, had the same 15-epoch budget.
+""")
 
 
 def slide_where(prs, f: Facts):
@@ -637,10 +646,13 @@ def slide_where(prs, f: Facts):
         best = sorted(pc.items(), key=lambda kv: -kv[1])[:3]
         worst = sorted(pc.items(), key=lambda kv: kv[1])[:2]
         items.append("largest gains: " + ", ".join(f"{k} {v:+.1f}" for k, v in best))
-        items.append("largest drops: " + ", ".join(f"{k} {v:+.1f}" for k, v in worst))
+        items.append(("smallest gains: " if worst[0][1] > 0 else "largest drops: ") + ", ".join(f"{k} {v:+.1f}" for k, v in worst))
     bullets(s, 0.6, 5.3, 6.4, 1.6, items or ["size/class breakdown pending"], size=11.5, gap=3)
     best = ", ".join(f"{k} {v:+.1f}" for k, v in sorted(pc.items(), key=lambda kv: -kv[1])[:3]) if pc else "?"
-    notes(s, f"[Backup] Use if asked which objects benefit: every class improves; the largest gains are {best}. Person and car, which COCO-pretrained YOLO already knows well, gain least.")
+    notes(s, f"""
+Where does it help? By object size, AP rises in every bin: small objects from {pct(f.mean('baseline', 'test_map_small'))} to {pct(f.mean('lngn', 'test_map_small'))}, large ones from {pct(f.mean('baseline', 'test_map_large'))} to {pct(f.mean('lngn', 'test_map_large'))}.
+By class, all 20 classes improve. Animals gain the most — {best} — while person and car, which COCO-pretrained YOLO already knows well, gain the least.
+""")
 
 
 def slide_errors(prs, f: Facts):
@@ -665,7 +677,7 @@ def slide_errors(prs, f: Facts):
     if gl and "baseline" in e:
         tail = f" The global-vector control cuts class errors to {100 * gl['dap50_mean']['cls']:.2f} but leaves box errors at {100 * gl['dap50_mean']['loc']:.2f} — better boxes need the spatial layout."
     notes(s, f"""
-[0:45] Which errors does it fix? TIDE-style: fix one error type with an oracle and measure the AP50 recovered.
+Which errors does it fix? TIDE-style: fix one error type with an oracle and measure the AP50 recovered.
 Wrong-class errors drop the most, missed objects next, box errors much less. At the 0.25 operating point, wrong-class detections fall from {e['baseline']['counts_mean']['cls']:.0f} to {e['lngn']['counts_mean']['cls']:.0f} and missed objects from {e['baseline']['counts_mean']['missed']:.0f} to {e['lngn']['counts_mean']['missed']:.0f}.
 So DINOv2 mainly fixes what an object is, more than where it is.{tail}
 """ if "baseline" in e and "lngn" in e else "error analysis pending")
@@ -707,7 +719,7 @@ def slide_cost(prs, f: Facts):
     b518, b8n = f.bench.get(("yolov8n", "lngn", 518)), f.bench.get(("yolov8n", "baseline", None))
     ratio = f"{b518['gflops_total'] / b8n['gflops_total']:.0f}" if b518 and b8n else "?"
     notes(s, f"""
-[0:50] Is it worth the cost? At 518 px the fused model needs {ratio}× YOLOv8n's FLOPs, so the fair question is: why not just use a bigger CNN?
+Is it worth the cost? At 518 px the fused model needs {ratio}× YOLOv8n's FLOPs, so the fair question is: why not just use a bigger CNN?
 YOLOv8s, trained the same way, gets {pct(v8s)}. Fusion at 518 beats it by {f.d('capacity', 'lngn518_vs_yolov8s')}.
 At 224 px fusion needs fewer FLOPs than YOLOv8s and is faster per image in batches — and still wins by {f.d('capacity', 'lngn224_vs_yolov8s')}. So H3 holds.
 Batch-1 latency is higher on this laptop GPU because it is launch-bound; it is in the table, not hidden.
@@ -737,7 +749,7 @@ def slide_regimes(prs, f: Facts):
     low_t = f.s.get("lowdata") or {}
     low_fused = (low_t.get("lngn") or {}).get("test_map_mean")
     notes(s, f"""
-[0:40] H4. With only 10% of the labels the gain grows to {f.d('lowdata', 'lngn')}: the fused model with 10% labels ({pct(low_fused)}) is about as good as the baseline with all labels ({pct(f.mean('baseline'))}).
+H4. With only 10% of the labels the gain grows to {f.d('lowdata', 'lngn')}: the fused model with 10% labels ({pct(low_fused)}) is about as good as the baseline with all labels ({pct(f.mean('baseline'))}).
 On VisDrone — aerial images, tiny objects — the gain shrinks to {f.d('visdrone', 'lngn')}, as predicted: DINO patches are 14 px and the context enters at stride 32.
 Normalization again makes no difference there.
 """)
@@ -752,7 +764,7 @@ def slide_qualitative(prs, f: Facts):
     if q:
         text(s, 9.0, 5.25, 3.75, 1.6, f"Per-image score (TP − FP at conf ≥ 0.25) improves on {q['images_better']} and worsens on {q['images_worse']} of {q['images_compared']} test images (1–6 objects).", size=11, color=GREY)
     notes(s, f"""
-[0:25] Examples, chosen automatically by the largest per-image change between the two models. Fusion improves {q.get('images_better', '?')} images and hurts {q.get('images_worse', '?')} of {q.get('images_compared', '?')}.
+Examples, chosen automatically by the largest per-image change between the two models. Fusion improves {q.get('images_better', '?')} images and hurts {q.get('images_worse', '?')} of {q.get('images_compared', '?')}.
 The right panel shows where it hurts — failures are included on purpose.
 """)
 
@@ -771,7 +783,11 @@ def slide_threats(prs, f: Facts):
         ["Short schedule", "Same 15 epochs for every arm; dev curves inspected", "Longer training may narrow the gap"],
     ]
     table(s, 0.6, 1.8, 12.15, rows, [2.75, 5.7, 3.7], size=11, row_h=0.52)
-    notes(s, "[Backup] Use if asked about rigor: walk the left column and name the experiment that rules each explanation out.")
+    notes(s, """
+Finally, the boring explanations I ruled out. Run-to-run noise: three seeds and bootstrap confidence intervals. Choosing on the test set: checkpoints are chosen on validation.
+Confounds: one factor per arm, plus two controls. 'Not significant' versus 'the same': an equivalence test with Holm correction. Bugs: 17 unit tests.
+Extra compute: the YOLOv8s control. One dataset: VisDrone and the 10%-label regime. What remains: three seeds, one ViT size, and the 15-epoch budget.
+""")
 
 
 def slide_conclusion(prs, f: Facts):
@@ -816,7 +832,7 @@ def slide_conclusion(prs, f: Facts):
         fill=SAND, title_color=CORAL, body_size=12,
     )
     notes(s, f"""
-[0:45] To conclude. H1 is rejected: normalization changes the injected scale ten-fold, but not the accuracy. H2 holds: {f.d('main', 'lngn')} points.
+To conclude. H1 is rejected: normalization changes the injected scale ten-fold, but not the accuracy. H2 holds: {f.d('main', 'lngn')} points.
 H3 holds: fusion beats a bigger CNN even at lower compute. H4 holds: a larger gain with fewer labels, a smaller one on tiny aerial objects.
 What actually matters is the spatial DINOv2 context; a learnable gate adds a little.
 Main limitation: the 15-epoch budget — the dev gap is still shrinking, so I cannot claim it persists at full convergence. Thank you, I'm happy to take questions.
@@ -879,33 +895,53 @@ bootstrap CIs, mechanism logging, cost and generalization experiments.
 """
 
 
+def export_script(prs, path: Path) -> None:
+    out = ["# Speaker script", "", "Generated together with the deck; the same text is in each slide's speaker notes.", ""]
+    for i, slide in enumerate(prs.slides, 1):
+        boxes = [sh.text_frame.text for sh in slide.shapes if sh.has_text_frame and sh.text_frame.text.strip()]
+        label = "01  /  TITLE" if i == 1 else boxes[0]
+        out += [f"## {label}", "", "\n\n".join(slide.notes_slide.notes_text_frame.text.splitlines()), ""]
+    path.write_text("\n".join(out), encoding="utf-8")
+
+
 def main() -> None:
     summary_path = RESULTS_ROOT / "summary.json"
     summary = json.loads(summary_path.read_text()) if summary_path.exists() else {}
     f = Facts(summary)
     prs = Presentation()
     prs.slide_width, prs.slide_height = Inches(13.333), Inches(7.5)
-    core = (
-        slide_title,
-        slide_problem,
-        slide_question,
-        slide_method,
-        slide_statistics,
-        slide_experiments,
-        slide_main,
-        slide_mechanism,
-        slide_controls,
-        slide_errors,
-        slide_cost,
-        slide_regimes,
-        slide_qualitative,
-        slide_conclusion,
+    talk = (  # (slide, seconds) for a 15-minute slot, leaving ~40 s of slack
+        (slide_title, 25),
+        (slide_problem, 45),
+        (slide_question, 40),
+        (slide_method, 65),
+        (slide_protocol, 45),
+        (slide_statistics, 50),
+        (slide_experiments, 50),
+        (slide_main, 70),
+        (slide_mechanism, 50),
+        (slide_controls, 60),
+        (slide_curves, 35),
+        (slide_where, 40),
+        (slide_errors, 50),
+        (slide_cost, 60),
+        (slide_regimes, 50),
+        (slide_qualitative, 35),
+        (slide_threats, 40),
+        (slide_conclusion, 50),
     )
-    backup = (slide_threats, slide_protocol, slide_curves, slide_where, slide_related, slide_backup)
+    backup = (slide_related, slide_backup)
     global CORE
-    CORE = len(core)
-    for build in (*core, *backup):
+    CORE = len(talk)
+    clock = 0
+    for build, seconds in talk:
         build(prs, f)
+        clock += seconds
+        frame = prs.slides[-1].notes_slide.notes_text_frame
+        frame.text = f"[{seconds} s · finish by {clock // 60}:{clock % 60:02d}]\n{frame.text}"
+    for build in backup:
+        build(prs, f)
+    export_script(prs, SCRIPT)
     OUT.parent.mkdir(parents=True, exist_ok=True)
     try:
         prs.save(OUT)

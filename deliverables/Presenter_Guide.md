@@ -1,9 +1,10 @@
 # Final presentation: rehearsal guide (Friday)
 
 **Graded on:** depth of experimentation and quality of analysis.
-**Plan for:** 10 minutes of talk plus questions. At the midterm the TA said "everyone has been going above 10 minutes".
-**Deck:** 14 main slides, then 6 backup slides (B1–B6) that you show only if someone asks.
-**Speaker notes:** every slide has a timed script. In PowerPoint use Slide Show, then *Use Presenter View*.
+**Plan for:** a 15-minute talk. The script runs 14:20, leaving about 40 seconds of slack.
+**Ask the coordinator beforehand:** are questions inside the 15 minutes? If yes, use the 12-minute cut in section 2.
+**Deck:** 18 talk slides, then 2 backup slides (B1–B2) that you show only if someone asks.
+**Speaker notes:** every slide's notes start with its time budget and the clock time to finish by, for example *[45 s · finish by 1:10]*. In PowerPoint use Slide Show, then *Use Presenter View*.
 
 ---
 
@@ -17,34 +18,45 @@
 
 ---
 
-## 2. Talk plan: 14 slides in about 10 minutes
+## 2. Talk plan: 18 slides in about 14 minutes
 
-| # | Slide | Time | Ends at | The one message |
+| # | Slide | Time | Finish by | The one message |
 |---|---|---|---|---|
-| 1 | Title | 0:20 | 0:20 | You asked "why LN+GN"; here is the answer, backed by 45 runs. |
-| 2 | Starting point | 0:40 | 1:00 | The midterm jump changed five things at once, plus a weight-transfer bug. It was a hypothesis, not a result. |
-| 3 | Research question | 0:30 | 1:30 | Four hypotheses, each with a stated way to fail. |
-| 4 | Method | 0:50 | 2:20 | One factor per arm. Channel-correct transfer and zero-init mean every arm starts as exactly the baseline. |
-| 5 | Why normalization could matter | 0:40 | 3:00 | The intuition: an 8× scale gap and a 10× spread at init. Prediction: if scale matters, accuracies differ. |
-| 6 | Experiment map | 0:45 | 3:45 | Depth: 45 runs, 42 GPU-hours, every row a controlled question. |
-| 7 | Main result | 1:00 | 4:45 | +10.5 [9.8, 11.2]. Normalization arms are equivalent within ±0.5. Only gating differs (+0.73). |
-| 8 | Mechanism | 0:40 | 5:25 | Reliance on DINO differs 1.9× across arms, accuracy by 0.26: the network rescales the context itself. |
-| 9 | Controls | 0:55 | 6:20 | Spatial layout gives two-thirds of the gain. Gate and init each add about 0.3–0.4. |
-| 10 | Error analysis | 0:45 | 7:05 | It fixes what an object is (wrong class −74%) more than where it is (boxes −31%). |
-| 11 | Cost | 0:50 | 7:55 | It beats YOLOv8s by +6.3. At 224 px it uses fewer FLOPs than YOLOv8s and still wins by +3.0. |
-| 12 | Generalization | 0:40 | 8:35 | +15.0 with 10% of labels; +0.8 on VisDrone; normalization irrelevant on both. |
-| 13 | Examples | 0:25 | 9:00 | Where it helps and where it hurts; failures are shown on purpose. |
-| 14 | Conclusions | 0:45 | 9:45 | Verdicts: H1 rejected, H2–H4 supported. Limitation: the 15-epoch budget. |
+| 1 | Title | 0:25 | 0:25 | You asked "why LN+GN"; here is the answer, backed by 45 runs. |
+| 2 | Starting point | 0:45 | 1:10 | The midterm jump changed five things at once, plus a weight-transfer bug. It was a hypothesis, not a result. |
+| 3 | Research question | 0:40 | 1:50 | Four hypotheses, each with a stated way to fail. |
+| 4 | Method | 1:05 | 2:55 | One factor per arm. Channel-correct transfer and zero-init mean every arm starts as exactly the baseline. |
+| 5 | Protocol | 0:45 | 3:40 | Same data and schedule for every arm. Checkpoint chosen on validation, test scored once. mAP50-95, 3 seeds, bootstrap CIs. |
+| 6 | Why normalization could matter | 0:50 | 4:30 | The intuition: an 8× scale gap and a 10× spread at init. Prediction: if scale matters, accuracies differ. |
+| 7 | Experiment map | 0:50 | 5:20 | Depth: 45 runs, 42 GPU-hours, every row a controlled question. |
+| 8 | Main result | 1:10 | 6:30 | +10.5 [9.8, 11.2]. Normalization arms are equivalent within ±0.5. Only gating differs (+0.73). |
+| 9 | Mechanism | 0:50 | 7:20 | Reliance on DINO differs 1.9× across arms, accuracy by 0.26: the network rescales the context itself. |
+| 10 | Controls | 1:00 | 8:20 | Spatial layout gives two-thirds of the gain. Gate and init each add about 0.3–0.4. |
+| 11 | Training budget | 0:35 | 8:55 | The gap shrinks from 19.8 to 10.7 over 15 epochs: part of the gain is faster learning. Say this honestly. |
+| 12 | Where it helps | 0:40 | 9:35 | Every object size and all 20 classes improve; animals most, person and car least. |
+| 13 | Error analysis | 0:50 | 10:25 | It fixes what an object is (wrong class −74%) more than where it is (boxes −31%). |
+| 14 | Cost | 1:00 | 11:25 | It beats YOLOv8s by +6.3. At 224 px it uses fewer FLOPs than YOLOv8s and still wins by +3.0. |
+| 15 | Generalization | 0:50 | 12:15 | +15.0 with 10% of labels; +0.8 on VisDrone; normalization irrelevant on both. |
+| 16 | Examples | 0:35 | 12:50 | Where it helps and where it hurts; failures are shown on purpose. |
+| 17 | Threats to validity | 0:40 | 13:30 | Every boring explanation and the experiment that rules it out. |
+| 18 | Conclusions | 0:50 | 14:20 | Verdicts: H1 rejected, H2–H4 supported. Limitation: the 15-epoch budget. |
 
-**If you are running late:** at slide 10, say only the first sentence of slide 13 (Examples) and go straight to Conclusions.
+**Checkpoints during the talk:**
+- Main result (slide 8) should start at about **5:20**.
+- Cost (slide 14) should start at about **10:25**.
+- If you are more than 30 seconds behind, shorten Examples (16) and Threats (17) to one sentence each.
+
+**If questions are inside the 15 minutes (a 12-minute talk):**
+1. Skip Protocol (5) and say its key sentence on the Experiment map instead: "checkpoint chosen on validation, test scored once, three seeds".
+2. Skip Where it helps (12).
+3. Skip Threats (17).
+4. Cut Training budget (11) to one sentence in the Conclusions.
+
+That saves about 2:40, so the talk ends near 11:40.
 
 **Backup slides** (the slide number to type during the show is in brackets):
-- B1 Threats to validity [15]
-- B2 Protocol [16]
-- B3 Training budget [17]
-- B4 Where it helps (object size and per-class) [18]
-- B5 Related work [19]
-- B6 Reproducibility [20]
+- B1 Related work [19]
+- B2 Reproducibility and likely questions [20]
 
 Jump to one only when a question needs it.
 
@@ -116,7 +128,7 @@ Keep every answer under 30 seconds: say the claim, then the number, then stop.
 
 **Results**
 
-10. **"Is it just faster convergence?"** (Show B3.)
+10. **"Is it just faster convergence?"** (Slide 11.)
     Partly, and I say so. The dev gap shrinks from about 20 to 10.7 points over 15 epochs and is still shrinking. All arms and YOLOv8s got the same budget. I can't claim the gap persists at full convergence; that is my main limitation.
 
 11. **"Why does DINOv2 help classification more than localization?"**
@@ -125,7 +137,7 @@ Keep every answer under 30 seconds: say the claim, then the number, then stop.
 12. **"Why does the gate help when normalization doesn't?"**
     The gate is a learnable per-channel scale, so the model can pick useful DINO channels. It is worth +0.32 on its own, and the larger init adds +0.41. Both are small next to the +10.5 from spatial context.
 
-13. **"Which classes benefit?"** (Show B4.)
+13. **"Which classes benefit?"** (Slide 12.)
     All 20 classes improve. Animals gain most: bird +19, dog +19, cat +15. Person and car gain least (+5.6 and +4.0), because COCO-pretrained YOLO already knows them well.
 
 **Cost and fairness**
@@ -179,6 +191,6 @@ That is better than guessing; it shows analytical thinking.
 | When | What |
 |---|---|
 | Wednesday evening | Read the speaker notes aloud twice with a timer. Mark the slides where you run over. |
-| Thursday | Three timed full runs; target 9:30–10:00. Record one on your phone and watch it once. Say answers 1, 6, 7, 10, 11 and 14 aloud until each takes under 30 seconds. |
+| Thursday | Three timed full runs; target 14:00–14:30. Record one on your phone and watch it once. Say answers 1, 6, 7, 10, 11 and 14 aloud until each takes under 30 seconds. |
 | Thursday night | Mock Q&A with me: reply **"mock Q&A"** and I'll ask TA-style questions one at a time and critique your answers. |
 | Friday morning | One final run. Check screen sharing with Presenter View. Open the deck file in advance. Know how to jump to backup slides (type the slide number, then press Enter). |
