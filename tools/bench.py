@@ -8,14 +8,22 @@ from __future__ import annotations
 import argparse
 
 from nafuse import RESULTS_ROOT
-from nafuse.bench import run_benchmarks
+from nafuse.bench import run_benchmarks, run_fast_benchmarks
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--n", type=int, default=50)
     parser.add_argument("--rounds", type=int, default=5)
+    parser.add_argument("--fast", action="store_true", help="batch-1 latency: eager vs CUDA-graph replay")
     args = parser.parse_args()
+    if args.fast:
+        for row in run_fast_benchmarks(RESULTS_ROOT / "bench_fast.json"):
+            print(
+                f"{row['model']:8s} {row['arm']:9s} res={row['dino_res']!s:5s} eager={row['eager_ms']:.2f}ms "
+                f"graph={row['graph_ms']:.2f}ms  max|diff|={row['max_abs_diff']:.1e}"
+            )
+        return
     for row in run_benchmarks(RESULTS_ROOT / "bench.json", n=args.n, rounds=args.rounds):
         print(
             f"{row['model']:8s} {row['arm']:9s} res={row['dino_res']!s:5s} "

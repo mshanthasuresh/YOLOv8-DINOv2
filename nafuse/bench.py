@@ -15,6 +15,7 @@ import torch
 from torch.utils.flop_counter import FlopCounterMode
 
 from .dino import FrozenDINO, load_backbone
+from .fast import GraphedModel, first_tensor
 from .model import build_model
 
 CONFIGS = [("yolov8n.yaml", None), ("yolov8s.yaml", None)]
@@ -95,6 +96,50 @@ def run_benchmarks(out_path: Path, n: int = 50, rounds: int = 5, imgsz: int = 64
         "protocol": f"{imgsz}x{imgsz}, FP16, Conv+BN fused, forward pass incl. DINOv2 preprocessing (no NMS), "
         f"CUDA-synchronized. latency_ms: median over {rounds} round-robin rounds of the median of {n} batch-1 "
         f"iterations. ms_per_image_batched: batch-{batch} time / {batch}. FLOPs: torch FlopCounterMode.",
+    }
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps({"meta": meta, "rows": rows}, indent=2))
+    return rows
+
+
+FAST_CONFIGS = [("yolov8n.yaml", None), ("yolov8s.yaml", None)]
+FAST_CONFIGS += [("yolov8n.yaml", {"arm": "lngn", "resolution": r}) for r in (224, 336, 448, 518)]
+
+
+def run_fast_benchmarks(out_path: Path, n: int = 200, rounds: int = 5, imgsz: int = 640) -> list[dict]:
+    """Batch-1 latency, eager vs CUDA-graph replay, timed round-robin over all models like run_benchmarks."""
+    x = torch.rand(1, 3, imgsz, imgsz, device="cuda", dtype=torch.half)
+    entries = []
+    for cfg, fusion in FAST_CONFIGS:
+        model = build_model(cfg, nc=20, fusion=fusion).to("cuda").eval()
+        model.fuse(verbose=False)
+        model.half()
+        with torch.inference_mode():
+            reference = first_tensor(model(x)).clone()
+        graphed = GraphedModel(model, x)
+        row = {
+            "model": cfg.replace(".yaml", ""),
+            "arm": fusion["arm"] if fusion else "baseline",
+            "dino_res": fusion["resolution"] if fusion else None,
+            "max_abs_diff": float((first_tensor(graphed(x)) - reference).abs().max()),
+        }
+        entries.append((row, model, graphed))
+    samples = {i: {"eager": [], "graph": []} for i in range(len(entries))}
+    for _ in range(rounds):
+        for i, (_, model, graphed) in enumerate(entries):
+            samples[i]["eager"].append(_median_ms(lambda m=model: m(x), n // 4, 10))
+            samples[i]["graph"].append(_median_ms(lambda g=graphed: g(x), n, 20))
+    rows = []
+    for i, (row, _, _) in enumerate(entries):
+        row["eager_ms"] = float(np.median(samples[i]["eager"]))
+        row["graph_ms"] = float(np.median(samples[i]["graph"]))
+        rows.append(row)
+    meta = {
+        "gpu": torch.cuda.get_device_name(0),
+        "torch": torch.__version__,
+        "protocol": f"batch 1, {imgsz}x{imgsz}, FP16 detector, Conv+BN fused, forward incl. DINOv2 preprocessing (no NMS). "
+        f"Median over {rounds} round-robin rounds of the median of {n} graph / {n // 4} eager iterations. "
+        "max_abs_diff: largest |difference| between the graph replay and the eager head output.",
     }
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps({"meta": meta, "rows": rows}, indent=2))

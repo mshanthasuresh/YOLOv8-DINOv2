@@ -81,13 +81,14 @@ Jump to one only when a question needs it.
 | Cost: YOLOv8s | 28.5 GFLOPs, 3.69 ms/img |
 | Cost: fusion @224 | 20.4 GFLOPs, 3.20 ms/img |
 | Cost: fusion @518 | 101.6 GFLOPs, 9.65 ms/img |
+| Batch-1 latency, normal → CUDA graph (same outputs) | fusion @518: 19.3 → 9.9 ms; fusion @224: 19.5 → 5.0 ms; YOLOv8s: 7.9 → 3.5 ms; YOLOv8n: 8.0 → 1.9 ms |
 | DINOv2 resolution | 224: 64.6; 336: 66.7; 448: 67.9; 518: 68.0 |
 | 10% labels | 42.2 → 57.2, **+15.0** [14.3, 15.7]; fusion with 10% labels ≈ baseline with 100% (57.5) |
 | VisDrone | 12.5 → 13.2, **+0.8** [0.6, 0.9]; LN+GN vs no norm +0.04 [−0.06, +0.15] |
 | Object size (AP) | small 19.9 → 29.3; medium 40.4 → 48.8; large 63.4 → 75.5 |
 | Per class | every class improves; most: bird +19.3, dog +19.2, cat +14.9; least: car +4.0, person +5.6 |
 | Dev gap (training dynamics) | 19.8 at epoch 1 → 13.3 at epoch 10 → 10.7 at epoch 15, still shrinking |
-| Scale of the study | 45 runs, 42 GPU-hours, 17 unit tests |
+| Scale of the study | 45 runs, 42 GPU-hours, 19 unit tests |
 
 ---
 
@@ -110,7 +111,7 @@ Keep every answer under 30 seconds: say the claim, then the number, then stop.
    I split the first neck convolution into its DINO part and its YOLO part. The share is RMS(DINO response) / (RMS(DINO) + RMS(YOLO)). It starts at exactly 0 because of zero-init, and I logged it every 50 iterations.
 
 5. **"How do you know the copied weights are right?"**
-   There is a unit test: with the DINO columns zeroed, the fused model's output equals the baseline exactly (max difference 0) for every arm. In total, 17 tests cover offsets, pickling, resume, gradient flow and the error analysis.
+   There is a unit test: with the DINO columns zeroed, the fused model's output equals the baseline exactly (max difference 0) for every arm. In total, 19 tests cover offsets, pickling, resume, gradient flow, the error analysis and CUDA-graph equality.
 
 **Statistics**
 
@@ -148,8 +149,18 @@ Keep every answer under 30 seconds: say the claim, then the number, then stop.
 15. **"Was the YOLOv8s comparison fair?"**
     Yes: same data, 15-epoch schedule, optimizer, COCO initialization, checkpoint selection on dev, and 3 seeds.
 
-16. **"Batch-1 latency is worse. Isn't that a problem?"**
-    Yes for real-time single-image use: 22.6 vs 9.5 ms on this laptop GPU. That figure is launch-bound, which is why I also report FLOPs and batched time. I show it in the table rather than hide it.
+16. **"Batch-1 latency is worse. Isn't that a problem? Can you make inference faster?"**
+    At batch 1 on this laptop GPU, the GPU mostly waits for the CPU to launch hundreds of small kernels. That's why normal latency is about 19 ms whether DINOv2 runs at 224 or 518 px.
+
+    I capture the whole forward pass once and replay it as a single **CUDA graph**. It runs the same kernels and produces bit-identical outputs; I checked this on 200 real test images and with a unit test.
+
+    | Model | Normal | CUDA graph |
+    |---|---|---|
+    | Fusion @518 | 19.3 ms | **9.9 ms** |
+    | Fusion @224 | 19.5 ms | **5.0 ms** |
+    | YOLOv8s | 7.9 ms | 3.5 ms |
+
+    Accuracy doesn't change at all. Further speed-ups would need TensorRT, fewer ViT blocks, or distilling DINOv2 into YOLO, which is future work.
 
 17. **"Did you tune hyperparameters per arm?"**
     No. Every arm uses identical settings, which avoids tuning bias. The risk is that some arm would prefer a different learning rate; that is a stated limitation.

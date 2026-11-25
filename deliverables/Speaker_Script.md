@@ -138,7 +138,7 @@ YOLOv8s, trained the same way, gets 61.8. Fusion at 518 beats it by +6.3.
 
 At 224 px fusion needs fewer FLOPs than YOLOv8s and is faster per image in batches — and still wins by +3.0. So H3 holds.
 
-Batch-1 latency is higher on this laptop GPU because it is launch-bound; it is in the table, not hidden.
+At batch 1 the GPU mostly waits for the CPU to launch kernels, so I replay the whole forward pass as one CUDA graph: same kernels, bit-identical outputs, and LN+GN at 518 drops from 19 to 10 ms, at 224 from 19 to 5 ms.
 
 ## 15  /  GENERALIZATION
 
@@ -164,7 +164,7 @@ The right panel shows where it hurts — failures are included on purpose.
 
 Finally, the boring explanations I ruled out. Run-to-run noise: three seeds and bootstrap confidence intervals. Choosing on the test set: checkpoints are chosen on validation.
 
-Confounds: one factor per arm, plus two controls. 'Not significant' versus 'the same': an equivalence test with Holm correction. Bugs: 17 unit tests.
+Confounds: one factor per arm, plus two controls. 'Not significant' versus 'the same': an equivalence test with Holm correction. Bugs: 19 unit tests.
 
 Extra compute: the YOLOv8s control. One dataset: VisDrone and the 10%-label regime. What remains: three seeds, one ViT size, and the 15-epoch budget.
 

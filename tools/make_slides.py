@@ -236,6 +236,9 @@ class Facts:
         self.boot = (summary.get("bootstrap") or {}).get("main", {})
         self.boot_nn = (summary.get("bootstrap") or {}).get("main_vs_nonorm", {})
         self.bench = {(r["model"], r["arm"], r["dino_res"]): r for r in ((summary.get("bench") or {}).get("rows") or [])}
+        fast = RESULTS_ROOT / "bench_fast.json"
+        fast_rows = json.loads(fast.read_text())["rows"] if fast.exists() else []
+        self.fast = {(r["model"], r["arm"], r["dino_res"]): r for r in fast_rows}
         self.tokens = summary.get("tokens") or {}
         self.diag = summary.get("diagnostics") or {}
         self.figs = summary.get("figures") or {}
@@ -686,7 +689,7 @@ So DINOv2 mainly fixes what an object is, more than where it is.{tail}
 def slide_cost(prs, f: Facts):
     s = new_slide(prs, "Cost", "Is the accuracy worth a ViT? Cost and a bigger-CNN control")
     picture(s, f.fig("cost_curve"), 0.6, 1.75, 8.0, 3.2)
-    rows = [["Model", "GFLOPs", "ms/img (b32)", "ms (b1)", "params"]]
+    rows = [["Model", "GFLOPs", "b32 ms/img", "b1 ms", "b1 graph", "params"]]
     for key, label in (
         (("yolov8n", "baseline", None), "YOLOv8n"),
         (("yolov8s", "baseline", None), "YOLOv8s"),
@@ -695,11 +698,13 @@ def slide_cost(prs, f: Facts):
         (("yolov8n", "lngn", 448), "LN+GN @448"),
         (("yolov8n", "lngn", 518), "LN+GN @518"),
     ):
-        b = f.bench.get(key)
+        b, g = f.bench.get(key), f.fast.get(key)
         if b:
-            rows.append([label, f"{b['gflops_total']:.1f}", f"{b['ms_per_image_batched']:.2f}", f"{b['latency_ms']:.1f}", f"{b['params_total'] / 1e6:.1f}M"])
+            eager = g["eager_ms"] if g else b["latency_ms"]
+            graph = f"{g['graph_ms']:.1f}" if g else "–"
+            rows.append([label, f"{b['gflops_total']:.1f}", f"{b['ms_per_image_batched']:.2f}", f"{eager:.1f}", graph, f"{b['params_total'] / 1e6:.1f}M"])
     if len(rows) > 1:
-        table(s, 8.85, 1.8, 3.9, rows, [1.25, 0.65, 0.75, 0.6, 0.65], size=9.5, row_h=0.33)
+        table(s, 8.7, 1.8, 4.05, rows, [1.1, 0.6, 0.65, 0.5, 0.6, 0.6], size=9, row_h=0.33)
     points = {p["label"]: p for p in (f.s.get("cost_curve") or [])}
     items = []
     if "YOLOv8s" in points and "LN+GN @518" in points:
@@ -713,16 +718,22 @@ def slide_cost(prs, f: Facts):
     res = sorted((p for p in points.values() if p["label"].startswith("LN+GN @")), key=lambda p: p["gflops"] or 0)
     if len(res) > 1:
         items.append("DINO resolution sweep: " + ", ".join(f"{p['label'][7:]}: {pct(p['test_map_mean'])}" for p in res))
-    items.append("Latency at batch 1 on this laptop GPU is launch-bound; GFLOPs and batched time are the fair cost measures.")
-    bullets(s, 0.6, 5.1, 12.1, 1.8, items, size=12, gap=3)
+    g518, g224, g8s = (f.fast.get(k) for k in (("yolov8n", "lngn", 518), ("yolov8n", "lngn", 224), ("yolov8s", "baseline", None)))
+    if g518 and g224 and g8s:
+        items.append(f"Batch-1 latency is launch-bound. Replaying the forward pass as one CUDA graph (same kernels, bit-identical outputs) cuts LN+GN @518 from {g518['eager_ms']:.1f} to {g518['graph_ms']:.1f} ms and @224 from {g224['eager_ms']:.1f} to {g224['graph_ms']:.1f} ms (YOLOv8s: {g8s['graph_ms']:.1f} ms).")
+    else:
+        items.append("Latency at batch 1 on this laptop GPU is launch-bound; GFLOPs and batched time are the fair cost measures.")
+    bullets(s, 0.6, 5.05, 12.1, 1.9, items, size=11.5, gap=2)
     v8s = ((f.s.get("capacity") or {}).get("baseline") or {}).get("test_map_mean")
     b518, b8n = f.bench.get(("yolov8n", "lngn", 518)), f.bench.get(("yolov8n", "baseline", None))
     ratio = f"{b518['gflops_total'] / b8n['gflops_total']:.0f}" if b518 and b8n else "?"
+    graph_note = ""
+    if g518 and g224:
+        graph_note = f"\nAt batch 1 the GPU mostly waits for the CPU to launch kernels, so I replay the whole forward pass as one CUDA graph: same kernels, bit-identical outputs, and LN+GN at 518 drops from {g518['eager_ms']:.0f} to {g518['graph_ms']:.0f} ms, at 224 from {g224['eager_ms']:.0f} to {g224['graph_ms']:.0f} ms."
     notes(s, f"""
 Is it worth the cost? At 518 px the fused model needs {ratio}× YOLOv8n's FLOPs, so the fair question is: why not just use a bigger CNN?
 YOLOv8s, trained the same way, gets {pct(v8s)}. Fusion at 518 beats it by {f.d('capacity', 'lngn518_vs_yolov8s')}.
-At 224 px fusion needs fewer FLOPs than YOLOv8s and is faster per image in batches — and still wins by {f.d('capacity', 'lngn224_vs_yolov8s')}. So H3 holds.
-Batch-1 latency is higher on this laptop GPU because it is launch-bound; it is in the table, not hidden.
+At 224 px fusion needs fewer FLOPs than YOLOv8s and is faster per image in batches — and still wins by {f.d('capacity', 'lngn224_vs_yolov8s')}. So H3 holds.{graph_note}
 """)
 
 
@@ -777,7 +788,7 @@ def slide_threats(prs, f: Facts):
         ["Selecting on the test set", "Checkpoint picked on VOC07 val; test scored once per run", "—"],
         ["Confounded changes", "One factor per arm; controls for spatial layout and for the gate's init", "Adapter width (64) and α not varied"],
         ["'Not significant' ≠ 'no effect'", "Equivalence test (90% CI inside ±0.5 points); Holm over the 4 normalization comparisons", "The ±0.5 margin is a judgment call"],
-        ["Implementation bugs", "17 unit tests (zero-init equality, channel offsets, resume, error types); bootstrap AP equals Ultralytics exactly", "—"],
+        ["Implementation bugs", "19 unit tests (zero-init equality, channel offsets, resume, error types, CUDA-graph equality); bootstrap AP equals Ultralytics exactly", "—"],
         ["Gain bought with compute", "YOLOv8s control; DINOv2 resolution sweep; FLOPs and batched latency", "Latency on one GPU type"],
         ["One dataset", "10%-label regime; VisDrone aerial domain", "Two datasets, one ViT size"],
         ["Short schedule", "Same 15 epochs for every arm; dev curves inspected", "Longer training may narrow the gap"],
@@ -785,7 +796,7 @@ def slide_threats(prs, f: Facts):
     table(s, 0.6, 1.8, 12.15, rows, [2.75, 5.7, 3.7], size=11, row_h=0.52)
     notes(s, """
 Finally, the boring explanations I ruled out. Run-to-run noise: three seeds and bootstrap confidence intervals. Choosing on the test set: checkpoints are chosen on validation.
-Confounds: one factor per arm, plus two controls. 'Not significant' versus 'the same': an equivalence test with Holm correction. Bugs: 17 unit tests.
+Confounds: one factor per arm, plus two controls. 'Not significant' versus 'the same': an equivalence test with Holm correction. Bugs: 19 unit tests.
 Extra compute: the YOLOv8s control. One dataset: VisDrone and the 10%-label regime. What remains: three seeds, one ViT size, and the 15-epoch budget.
 """)
 
@@ -844,14 +855,15 @@ def slide_backup(prs, f: Facts):
     rows = [
         ["Command", "What it does"],
         ["python -m tools.prepare_data", "VOC download + fixed splits"],
-        ["python -m pytest tests", "17 tests: offsets, zero-init equality, pickling, resume, gradients, error types"],
+        ["python -m pytest tests", "19 tests: offsets, zero-init equality, pickling, resume, gradients, error types, CUDA graphs"],
+        ["python -m tools.bench --fast", "batch-1 latency, eager vs CUDA graph"],
         ["python -m tools.run_queue", "every run, resumable (laptop)"],
         ["tools.kaggle_worker", "same runs on Kaggle GPUs, one per GPU"],
         ["python -m tools.analyze", "tables, figures, bootstrap CIs, error analysis"],
         ["python -m tools.make_slides", "this deck"],
     ]
     table(s, 0.6, 1.8, 6.3, rows, [2.7, 3.6], size=11, row_h=0.42)
-    text(s, 0.6, 4.95, 6.3, 1.2, "Each run keeps its dev curve, diagnostics.jsonl, best.pt and per-image test matches, so every number in this deck can be regenerated.", size=12, color=GREY)
+    text(s, 0.6, 5.35, 6.3, 1.2, "Each run keeps its dev curve, diagnostics.jsonl, best.pt and per-image test matches, so every number in this deck can be regenerated.", size=12, color=GREY)
     label_box(
         s, 7.1, 1.8, 5.65, 3.6, "Likely questions",
         [

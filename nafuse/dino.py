@@ -20,6 +20,7 @@ EMBED_DIM = {"dinov2_vits14": 384, "dinov2_vitb14": 768}
 _MEAN = (0.485, 0.456, 0.406)
 _STD = (0.229, 0.224, 0.225)
 _BACKBONES: dict[tuple[str, str], torch.nn.Module] = {}
+_NORM_STATS: dict[tuple[str, torch.dtype], tuple[torch.Tensor, torch.Tensor]] = {}
 
 
 def load_backbone(name: str = "dinov2_vits14", device: torch.device | str = "cpu") -> torch.nn.Module:
@@ -69,8 +70,10 @@ class FrozenDINO:
         """RGB images in [0, 1] -> ImageNet-normalized, aspect-preserving, patch-aligned input."""
         size = dino_input_size(images.shape[-2], images.shape[-1], self.resolution)
         x = F.interpolate(images.float(), size=size, mode="bilinear", align_corners=False, antialias=True)
-        mean = x.new_tensor(_MEAN).view(1, 3, 1, 1)
-        std = x.new_tensor(_STD).view(1, 3, 1, 1)
+        key = (str(x.device), x.dtype)
+        if key not in _NORM_STATS:  # cached so that a CUDA-graph capture never needs a host-to-device copy
+            _NORM_STATS[key] = (x.new_tensor(_MEAN).view(1, 3, 1, 1), x.new_tensor(_STD).view(1, 3, 1, 1))
+        mean, std = _NORM_STATS[key]
         return (x - mean) / std
 
     @torch.no_grad()

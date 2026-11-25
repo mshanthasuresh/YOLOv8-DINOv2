@@ -11,6 +11,7 @@ from ultralytics.utils import YAML
 from nafuse import PROJECT_ROOT
 from nafuse.adapter import ARMS, FusionAdapter, SplitConv2d
 from nafuse.dino import dino_input_size
+from nafuse.fast import GraphedModel
 from nafuse.model import FusedDetectionModel, attach_fusion
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -195,3 +196,19 @@ def test_split_yaml_protocol_is_disjoint():
     cfg = YAML.load(voc)
     train = set(cfg["train"])
     assert cfg["val"] not in train and cfg["test"] not in train and cfg["val"] != cfg["test"]
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA graphs need a GPU")
+def test_cuda_graph_replay_is_bit_identical(baseline):
+    model = _fused(baseline).half()
+    x = torch.rand(1, 3, 64, 64, device="cuda", dtype=torch.half)
+    with torch.inference_mode():
+        eager = _first_tensor(model(x)).clone()
+    assert torch.equal(_first_tensor(GraphedModel(model, x)(x)), eager)
+
+
+def test_adapter_pickled_before_pool_flag_still_runs():
+    adapter = FusionAdapter("lngn", resolution=TEST_RES).to(DEVICE)
+    del adapter.__dict__["pool"]  # checkpoints saved before the "global" control lack this attribute
+    out = adapter(torch.rand(1, 3, 64, 64, device=DEVICE), (2, 2))
+    assert out.shape == (1, 64, 2, 2)

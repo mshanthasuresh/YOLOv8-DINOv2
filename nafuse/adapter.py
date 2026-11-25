@@ -66,6 +66,8 @@ class DiagnosticsRecorder:
 class FusionAdapter(nn.Module):
     """tokens -> [LayerNorm] -> 1x1 projection -> [GroupNorm] -> scale (fixed or gated) -> resize to P5 grid."""
 
+    pool = False  # class default so checkpoints pickled before the "global" control existed still load
+
     def __init__(
         self,
         arm: str = "lngn",
