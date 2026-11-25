@@ -130,6 +130,7 @@ def load_results(root: Path = RUNS_ROOT) -> pd.DataFrame:
         rows.append(
             {
                 **{k: spec[k] for k in ("name", "arm", "seed", "group", "dataset", "model", "dino_res", "epochs")},
+                "dino_depth": spec.get("dino_depth"),
                 "run_dir": str(path.parent),
                 "records": str(path.parent / "test" / "records.npz"),
                 "best_epoch": r["best_epoch"],

@@ -13,7 +13,7 @@ from ultralytics.utils import RANK, ops
 from ultralytics.utils.torch_utils import unwrap_model
 
 from .adapter import FusionAdapter, _rms
-from .model import FusedDetectionModel, attach_fusion
+from .model import FusedDetectionModel, attach_distill, attach_fusion
 
 
 def parameter_stats(model: FusedDetectionModel) -> dict[str, float]:
@@ -33,10 +33,20 @@ def parameter_stats(model: FusedDetectionModel) -> dict[str, float]:
 
 
 class FusionTrainer(DetectionTrainer):
-    """DetectionTrainer that builds :class:`FusedDetectionModel` (``fusion=None`` gives the matched baseline)."""
+    """DetectionTrainer that builds :class:`FusedDetectionModel` (``fusion=None`` gives the matched baseline;
+    ``distill`` adds a training-only DINOv2 feature-prediction head)."""
 
-    def __init__(self, cfg=DEFAULT_CFG, overrides=None, _callbacks=None, fusion: dict | None = None, diag_every=50):
+    def __init__(
+        self,
+        cfg=DEFAULT_CFG,
+        overrides=None,
+        _callbacks=None,
+        fusion: dict | None = None,
+        diag_every=50,
+        distill: dict | None = None,
+    ):
         self.fusion_cfg = fusion
+        self.distill_cfg = distill
         self.diag_every = diag_every
         self._diag_iter = -1
         super().__init__(cfg, overrides, _callbacks)
@@ -68,6 +78,8 @@ class FusionTrainer(DetectionTrainer):
             model.load(weights)
         if self.fusion_cfg:
             attach_fusion(model, FusionAdapter(**self.fusion_cfg))
+        if self.distill_cfg:
+            attach_distill(model, self.distill_cfg)
         return model
 
 

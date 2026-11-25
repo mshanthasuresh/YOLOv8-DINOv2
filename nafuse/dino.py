@@ -47,11 +47,17 @@ def dino_input_size(height: int, width: int, resolution: int) -> tuple[int, int]
 
 
 class FrozenDINO:
-    """Handle to a shared frozen backbone; deep-copies to itself and pickles without weights."""
+    """Handle to a shared frozen backbone; deep-copies to itself and pickles without weights.
 
-    def __init__(self, name: str = "dinov2_vits14", resolution: int = 518):
+    ``depth`` keeps only the first k transformer blocks (``None`` = all of them).
+    """
+
+    depth: int | None = None  # class default for handles pickled before the option existed
+
+    def __init__(self, name: str = "dinov2_vits14", resolution: int = 518, depth: int | None = None):
         self.name = name
         self.resolution = resolution
+        self.depth = depth
 
     @property
     def embed_dim(self) -> int:
@@ -61,7 +67,7 @@ class FrozenDINO:
         return self
 
     def __getstate__(self):
-        return {"name": self.name, "resolution": self.resolution}
+        return {"name": self.name, "resolution": self.resolution, "depth": self.depth}
 
     def __setstate__(self, state):
         self.__dict__.update(state)
@@ -82,5 +88,20 @@ class FrozenDINO:
         backbone = load_backbone(self.name, images.device)
         x = self.preprocess(images)
         with torch.autocast(device_type=images.device.type, dtype=torch.float16, enabled=images.is_cuda):
-            out = backbone.get_intermediate_layers(x, n=1, reshape=True, norm=final_norm)[0]
+            if self.depth is None:
+                out = backbone.get_intermediate_layers(x, n=1, reshape=True, norm=final_norm)[0]
+            else:
+                out = _truncated_tokens(backbone, x, self.depth, final_norm)
         return out.float()
+
+
+def _truncated_tokens(backbone: torch.nn.Module, x: torch.Tensor, depth: int, final_norm: bool) -> torch.Tensor:
+    """Same output layout as ``get_intermediate_layers(n=1, reshape=True)``, but blocks after ``depth`` never run."""
+    b, _, h, w = x.shape
+    t = backbone.prepare_tokens_with_masks(x)
+    for block in backbone.blocks[:depth]:
+        t = block(t)
+    if final_norm:
+        t = backbone.norm(t)
+    t = t[:, 1 + backbone.num_register_tokens :]
+    return t.reshape(b, h // backbone.patch_size, w // backbone.patch_size, -1).permute(0, 3, 1, 2).contiguous()

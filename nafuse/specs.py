@@ -10,6 +10,7 @@ CONTROL_ARMS = ("global", "gatedlow")
 DEFAULT_RES = 518
 MAIN_EPOCHS = 15
 LOW_DATA_EPOCHS = 30
+DISTILL_WEIGHT = 1.0
 
 
 @dataclass(frozen=True)
@@ -22,15 +23,23 @@ class RunSpec:
     dino_res: int = DEFAULT_RES
     epochs: int = MAIN_EPOCHS
     priority: int = 0
+    dino_depth: int | None = None  # first k DINOv2 blocks only; None = all 12
     train: dict = field(default_factory=dict, compare=False, hash=False)
 
     @property
     def name(self) -> str:
         res = f"-r{self.dino_res}" if self.arm != "baseline" and self.dino_res != DEFAULT_RES else ""
-        return f"{self.dataset}-{self.model}-{self.arm}{res}-s{self.seed}"
+        depth = f"-d{self.dino_depth}" if self.dino_depth else ""
+        return f"{self.dataset}-{self.model}-{self.arm}{res}{depth}-s{self.seed}"
 
     def fusion_cfg(self) -> dict | None:
-        return None if self.arm == "baseline" else {"arm": self.arm, "resolution": self.dino_res}
+        if self.arm in ("baseline", "distill"):
+            return None
+        cfg = {"arm": self.arm, "resolution": self.dino_res}
+        return {**cfg, "depth": self.dino_depth} if self.dino_depth else cfg
+
+    def distill_cfg(self) -> dict | None:
+        return {"resolution": self.dino_res, "weight": DISTILL_WEIGHT} if self.arm == "distill" else None
 
     def to_dict(self) -> dict:
         return {**asdict(self), "name": self.name}
@@ -74,4 +83,8 @@ def experiment_matrix(
     runs += [
         RunSpec("nonorm", s, group="visdrone", dataset="visdrone", epochs=visdrone_epochs, priority=8) for s in (0, 1)
     ]
+    # P9: cheaper inference - YOLOv8n distilled from DINOv2 (no ViT at test time) and a shorter DINOv2.
+    for s in (0, 1):
+        runs += [RunSpec("distill", s, group="distill", epochs=epochs, priority=9)]
+        runs += [RunSpec("lngn", s, group="depth", dino_depth=d, epochs=epochs, priority=9) for d in (4, 8)]
     return runs

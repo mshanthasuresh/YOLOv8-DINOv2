@@ -37,6 +37,8 @@ COLORS = {
     "yolov8s": "#152E2A",
     "global": "#7CC6BE",
     "gatedlow": "#F29E8E",
+    "depth": "#3D5A80",
+    "distill": "#8E7DBE",
 }
 SHORT = {
     "baseline": "Baseline",
@@ -47,6 +49,7 @@ SHORT = {
     "gated": "Gated",
     "global": "Global DINO",
     "gatedlow": "Gated, low init",
+    "distill": "Distilled",
 }
 EQUIV_MARGIN = 0.005  # ±0.5 mAP50-95 points, about the seed-to-seed sd of the baseline
 METRICS = [
@@ -311,12 +314,16 @@ def resolution_summary(df: pd.DataFrame, bench: dict | None, table: dict) -> tup
             }
         )
 
-    voc = df[df["dataset"] == "voc"]
+    voc = df[(df["dataset"] == "voc") & df["dino_depth"].isna()]
     add("YOLOv8n", voc[(voc["model"] == "yolov8n") & (voc["arm"] == "baseline")], ("yolov8n", "baseline", None), COLORS["baseline"])
     add("YOLOv8s", voc[(voc["model"] == "yolov8s") & (voc["arm"] == "baseline")], ("yolov8s", "baseline", None), COLORS["yolov8s"])
     for res in (224, 336, 448, DEFAULT_RES):
         sub = voc[(voc["model"] == "yolov8n") & (voc["arm"] == "lngn") & (voc["dino_res"] == res)]
         add(f"LN+GN @{res}", sub, ("yolov8n", "lngn", res), COLORS["lngn"])
+    depth = df[(df["dataset"] == "voc") & (df["group"] == "depth")]
+    for d in (4, 8):
+        add(f"LN+GN, {d} blocks", depth[depth["dino_depth"] == d], ("yolov8n", f"lngn-d{d}", DEFAULT_RES), COLORS["depth"])
+    add("Distilled YOLOv8n", voc[voc["group"] == "distill"], ("yolov8n", "baseline", None), COLORS["distill"])
     plotted = [p for p in points if p["gflops"] is not None]
     if len(plotted) < 2:
         return points, None
@@ -330,7 +337,7 @@ def resolution_summary(df: pd.DataFrame, bench: dict | None, table: dict) -> tup
             text = p["label"] if p["label"] in ("YOLOv8n", "YOLOv8s", "LN+GN @224") else p["label"].replace("LN+GN ", "")
             offset, ha = {"@336": ((-5, 4), "right"), "@448": ((0, -15), "center")}.get(text, ((5, 4), "left"))  # neighbours sit close on the log axis
             ax.annotate(text + (" px" if "@" in text else ""), (p[key], 100 * p["test_map_mean"]), textcoords="offset points", xytext=offset, ha=ha, fontsize=8)
-        lngn = sorted([p for p in plotted if p["label"].startswith("LN+GN")], key=lambda p: p[key])
+        lngn = sorted([p for p in plotted if p["label"].startswith("LN+GN @")], key=lambda p: p[key])
         if len(lngn) > 1:
             ax.plot([p[key] for p in lngn], [100 * p["test_map_mean"] for p in lngn], color=COLORS["lngn"], lw=1, alpha=0.6)
         ax.set_xscale("log")
@@ -370,9 +377,10 @@ def fig_data_regimes(regimes: list[tuple[str, dict]]) -> str | None:
     return _save(fig, "data_regimes")
 
 
-def _seeds(df: pd.DataFrame, group: str, arm: str, model: str = "yolov8n", res: int = DEFAULT_RES) -> dict:
-    rows = df[(df["group"] == group) & (df["arm"] == arm) & (df["model"] == model) & (df["dino_res"] == res)]
-    return {r.seed: r.records for r in rows.itertuples() if Path(r.records).exists()}
+def _seeds(df: pd.DataFrame, group: str, arm: str, model: str = "yolov8n", res: int = DEFAULT_RES, depth: int | None = None) -> dict:
+    sel = (df["group"] == group) & (df["arm"] == arm) & (df["model"] == model) & (df["dino_res"] == res)
+    sel &= df["dino_depth"].isna() if depth is None else df["dino_depth"] == depth
+    return {r.seed: r.records for r in df[sel].itertuples() if Path(r.records).exists()}
 
 
 def _family_tests(out: dict) -> None:
@@ -419,6 +427,17 @@ def run_bootstrap(df: pd.DataFrame, n_boot: int) -> dict:
     for res in (224, 336, 448):
         sweep = _seeds(voc, "resolution", "lngn", res=res)
         comparisons += [("resolution", str(res), base, sweep), ("capacity", f"lngn{res}_vs_yolov8s", v8s, sweep)]
+    distill = _seeds(voc, "distill", "distill")
+    d4, d8 = (_seeds(voc, "depth", "lngn", depth=d) for d in (4, 8))
+    comparisons += [
+        ("cheap", "distill_vs_baseline", base, distill),
+        ("cheap", "lngn_vs_distill", distill, lngn),
+        ("cheap", "d4_vs_baseline", base, d4),
+        ("cheap", "d8_vs_baseline", base, d8),
+        ("cheap", "full_vs_d4", d4, lngn),
+        ("cheap", "full_vs_d8", d8, lngn),
+        ("cheap", "d4_vs_yolov8s", v8s, d4),
+    ]
     compare(voc, comparisons)
 
     vis = df[df["dataset"] == "visdrone"]
@@ -429,9 +448,9 @@ def run_bootstrap(df: pd.DataFrame, n_boot: int) -> dict:
 
 
 def error_summary(df: pd.DataFrame) -> tuple[dict, str | None]:
-    voc = df[(df["dataset"] == "voc") & (df["model"] == "yolov8n") & (df["dino_res"] == DEFAULT_RES)]
+    voc = df[(df["dataset"] == "voc") & (df["model"] == "yolov8n") & (df["dino_res"] == DEFAULT_RES) & df["dino_depth"].isna()]
     out = {}
-    for arm in (*ALL_ARMS, *CONTROL_ARMS):
+    for arm in (*ALL_ARMS, *CONTROL_ARMS, "distill"):
         rows = [decompose(p) for p in voc[voc["arm"] == arm]["records"] if Path(p).exists()]
         if not rows:
             continue
@@ -529,6 +548,8 @@ def main() -> None:
     summary["lowdata"], summary["visdrone"] = low_t, vis_t
     summary["visdrone_all"] = _arm_table(df[df["dataset"] == "visdrone"])
     summary["capacity"] = _arm_table(df[df["group"] == "capacity"])
+    summary["distill"] = _arm_table(df[df["group"] == "distill"])
+    summary["depth"] = {str(d): _arm_table(df[(df["group"] == "depth") & (df["dino_depth"] == d)]) for d in (4, 8)}
     summary["control"], summary["figures"]["controls"] = fig_controls(df, table)
     summary["errors"], summary["figures"]["error_types"] = error_summary(df)
     summary["equivalence_margin"] = EQUIV_MARGIN

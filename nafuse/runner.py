@@ -54,6 +54,7 @@ def dev_history(results_csv: Path) -> pd.DataFrame:
 def param_counts(model) -> dict:
     model = unwrap_model(model)
     fusion = getattr(model, "fusion", None)
+    distill = getattr(model, "distill", None)
     added_neck = sum(
         (c.dino_slice[1] - c.dino_slice[0]) * c.out_channels * c.kernel_size[0] * c.kernel_size[1]
         for c in model.modules()
@@ -63,6 +64,7 @@ def param_counts(model) -> dict:
         "detector_params": sum(p.numel() for p in model.parameters()),
         "adapter_params": sum(p.numel() for p in fusion.parameters()) if fusion is not None else 0,
         "neck_dino_params": added_neck,
+        "distill_head_params": sum(p.numel() for p in distill.parameters()) if distill is not None else 0,
     }
 
 
@@ -105,7 +107,7 @@ def train_and_evaluate(spec: RunSpec, force: bool = False) -> dict:
     }
     start = time.time()
     if previous_epoch < spec.epochs:
-        trainer = FusionTrainer(overrides=overrides, fusion=spec.fusion_cfg())
+        trainer = FusionTrainer(overrides=overrides, fusion=spec.fusion_cfg(), distill=spec.distill_cfg())
         trainer.train()
         counts = param_counts(trainer.model)
         layout = getattr(unwrap_model(trainer.model), "fusion_layout", [])

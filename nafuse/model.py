@@ -15,12 +15,14 @@ from ultralytics.nn.modules import Concat
 from ultralytics.nn.tasks import DetectionModel
 
 from .adapter import FusionAdapter, SplitConv2d
+from .distill import DistillHead
 
 
 class FusedDetectionModel(DetectionModel):
     def _predict_once(self, x, profile=False, embed=None):
         fusion = getattr(self, "fusion", None)
-        if fusion is None:
+        distill = getattr(self, "distill", None)
+        if fusion is None and distill is None:
             return super()._predict_once(x, profile, embed)
         image = x
         y, dt, embeddings = [], [], []
@@ -33,7 +35,10 @@ class FusedDetectionModel(DetectionModel):
                 self._profile_one_layer(m, x, dt)
             x = m(x)
             if m.i == self.fuse_index:
-                x = self._fuse(image, x)
+                if distill is not None and self.training:
+                    self._p5 = x
+                if fusion is not None:
+                    x = self._fuse(image, x)
             y.append(x if m.i in self.save else None)
             if m.i in embed:
                 embeddings.append(F.adaptive_avg_pool2d(x, (1, 1)).squeeze(-1).squeeze(-1))
@@ -54,6 +59,18 @@ class FusedDetectionModel(DetectionModel):
 
     def split_convs(self) -> list[SplitConv2d]:
         return [m for m in self.modules() if isinstance(m, SplitConv2d)]
+
+    def loss(self, batch, preds=None):
+        distill = getattr(self, "distill", None)
+        if distill is None:
+            return super().loss(batch, preds)
+        if preds is None:
+            preds = self.forward(batch["img"])
+        loss, items = super().loss(batch, preds)
+        p5, self._p5 = getattr(self, "_p5", None), None
+        d = distill(p5, batch["img"]) if self.training and p5 is not None else loss.new_zeros(())
+        weighted = (distill.weight * batch["img"].shape[0] * d).reshape(1)  # same batch scaling as the box/cls/dfl terms
+        return torch.cat([loss, weighted]), {**items, "dino_loss": d.detach()}
 
 
 @torch.no_grad()
@@ -113,6 +130,15 @@ def attach_fusion(model: FusedDetectionModel, adapter: FusionAdapter, fuse_index
     model.fuse_index = fuse_index
     model.fusion_layout = layout
     model.yaml = {**model.yaml, "fusion": adapter.config()}
+    return model
+
+
+def attach_distill(model: FusedDetectionModel, head_cfg: dict, fuse_index: int | None = None):
+    """Training-only DINOv2 feature head on the SPPF output; the inference graph stays plain YOLO."""
+    fuse_index = len(model.yaml["backbone"]) - 1 if fuse_index is None else fuse_index
+    model.distill = DistillHead(layer_out_channels(model)[fuse_index], **head_cfg)
+    model.fuse_index = fuse_index
+    model.yaml = {**model.yaml, "distill": model.distill.config()}
     return model
 
 

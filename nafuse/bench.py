@@ -21,6 +21,13 @@ from .model import build_model
 CONFIGS = [("yolov8n.yaml", None), ("yolov8s.yaml", None)]
 CONFIGS += [("yolov8n.yaml", {"arm": arm, "resolution": 518}) for arm in ("nonorm", "ln", "gn", "lngn", "gated")]
 CONFIGS += [("yolov8n.yaml", {"arm": "lngn", "resolution": r}) for r in (224, 336, 448)]
+CONFIGS += [("yolov8n.yaml", {"arm": "lngn", "resolution": 518, "depth": d}) for d in (4, 8)]
+
+
+def _arm_label(fusion: dict | None) -> str:
+    if not fusion:
+        return "baseline"
+    return fusion["arm"] + (f"-d{fusion['depth']}" if fusion.get("depth") else "")
 
 
 def _sync():
@@ -59,7 +66,7 @@ def run_benchmarks(out_path: Path, n: int = 50, rounds: int = 5, imgsz: int = 64
         model.fuse(verbose=False)
         row = {
             "model": cfg.replace(".yaml", ""),
-            "arm": fusion["arm"] if fusion else "baseline",
+            "arm": _arm_label(fusion),
             "dino_res": fusion["resolution"] if fusion else None,
             "params_detector": sum(p.numel() for p in model.parameters()),
             "gflops_total": _gflops(lambda m=model: m(x1)),
@@ -68,7 +75,7 @@ def run_benchmarks(out_path: Path, n: int = 50, rounds: int = 5, imgsz: int = 64
         }
         dino = None
         if fusion:
-            dino = FrozenDINO(resolution=fusion["resolution"])
+            dino = FrozenDINO(resolution=fusion["resolution"], depth=fusion.get("depth"))
             row["params_dino"] = sum(p.numel() for p in load_backbone(dino.name, device).parameters())
             row["gflops_dino"] = _gflops(lambda d=dino: d.tokens(x1))
         row["params_total"] = row["params_detector"] + row["params_dino"]
@@ -104,6 +111,7 @@ def run_benchmarks(out_path: Path, n: int = 50, rounds: int = 5, imgsz: int = 64
 
 FAST_CONFIGS = [("yolov8n.yaml", None), ("yolov8s.yaml", None)]
 FAST_CONFIGS += [("yolov8n.yaml", {"arm": "lngn", "resolution": r}) for r in (224, 336, 448, 518)]
+FAST_CONFIGS += [("yolov8n.yaml", {"arm": "lngn", "resolution": 518, "depth": d}) for d in (4, 8)]
 
 
 def run_fast_benchmarks(out_path: Path, n: int = 200, rounds: int = 5, imgsz: int = 640) -> list[dict]:
@@ -119,7 +127,7 @@ def run_fast_benchmarks(out_path: Path, n: int = 200, rounds: int = 5, imgsz: in
         graphed = GraphedModel(model, x)
         row = {
             "model": cfg.replace(".yaml", ""),
-            "arm": fusion["arm"] if fusion else "baseline",
+            "arm": _arm_label(fusion),
             "dino_res": fusion["resolution"] if fusion else None,
             "max_abs_diff": float((first_tensor(graphed(x)) - reference).abs().max()),
         }

@@ -10,9 +10,9 @@ from ultralytics.utils import YAML
 
 from nafuse import PROJECT_ROOT
 from nafuse.adapter import ARMS, FusionAdapter, SplitConv2d
-from nafuse.dino import dino_input_size
+from nafuse.dino import FrozenDINO, dino_input_size
 from nafuse.fast import GraphedModel
-from nafuse.model import FusedDetectionModel, attach_fusion
+from nafuse.model import FusedDetectionModel, attach_distill, attach_fusion
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 TEST_RES = 56  # 4x4 DINO tokens keeps the tests fast; geometry logic is resolution independent
@@ -212,3 +212,38 @@ def test_adapter_pickled_before_pool_flag_still_runs():
     del adapter.__dict__["pool"]  # checkpoints saved before the "global" control lack this attribute
     out = adapter(torch.rand(1, 3, 64, 64, device=DEVICE), (2, 2))
     assert out.shape == (1, 64, 2, 2)
+
+
+def test_truncated_dino_matches_full_and_skips_blocks():
+    x = _images(1, 64, 64)
+    full = FrozenDINO(resolution=TEST_RES).tokens(x)
+    assert torch.allclose(FrozenDINO(resolution=TEST_RES, depth=12).tokens(x), full, atol=1e-4)
+    short = FrozenDINO(resolution=TEST_RES, depth=4).tokens(x)
+    assert short.shape == full.shape and not torch.allclose(short, full, atol=1e-2)
+    old = pickle.loads(pickle.dumps(FrozenDINO(resolution=TEST_RES)))
+    del old.__dict__["depth"]  # handles pickled before the option existed
+    assert torch.equal(old.tokens(x), full)
+
+
+def test_distillation_trains_head_and_backbone_but_not_inference(baseline):
+    from ultralytics.cfg import get_cfg
+
+    x = _images(1, 256, 256)
+    with torch.no_grad():
+        reference = _first_tensor(baseline(x))
+    model = attach_distill(copy.deepcopy(baseline), {"resolution": TEST_RES}).to(DEVICE).eval()
+    with torch.no_grad():
+        assert torch.equal(_first_tensor(model(x)), reference), "the head must not change inference"
+    model.train()
+    model.args = get_cfg()
+    batch = {
+        "img": _images(2, 256, 256),
+        "batch_idx": torch.tensor([0.0, 1.0], device=DEVICE),
+        "cls": torch.tensor([[3.0], [7.0]], device=DEVICE),
+        "bboxes": torch.tensor([[0.5, 0.5, 0.3, 0.4], [0.4, 0.6, 0.2, 0.2]], device=DEVICE),
+    }
+    loss, items = model.loss(batch)
+    assert loss.shape == (4,) and items["dino_loss"] > 0
+    loss.sum().backward()
+    assert model.distill.proj.weight.grad.abs().sum() > 0
+    assert model.model[9].cv2.conv.weight.grad.abs().sum() > 0, "distillation must reach the backbone (SPPF)"

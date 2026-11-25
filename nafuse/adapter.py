@@ -77,13 +77,14 @@ class FusionAdapter(nn.Module):
         proj_std: float | None = None,
         backbone: str = "dinov2_vits14",
         gn_groups: int = 1,
+        depth: int | None = None,
     ):
         super().__init__()
         if arm not in ARMS:
             raise ValueError(f"unknown fusion arm {arm!r}; choose from {sorted(ARMS)}")
         flags = ARMS[arm]
         self.arm = arm
-        self.dino = FrozenDINO(backbone, resolution)
+        self.dino = FrozenDINO(backbone, resolution, depth)
         dim = self.dino.embed_dim
         self.out_channels = out_channels
         self.gated = flags["gated"]
@@ -108,6 +109,7 @@ class FusionAdapter(nn.Module):
             "proj_std": self.proj_std,
             "backbone": self.dino.name,
             "gn_groups": self.gn_groups,
+            "depth": self.dino.depth,
         }
 
     def effective_scale(self) -> torch.Tensor | float:

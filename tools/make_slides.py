@@ -737,6 +737,50 @@ At 224 px fusion needs fewer FLOPs than YOLOv8s and is faster per image in batch
 """)
 
 
+def slide_cheap(prs, f: Facts):
+    s = new_slide(prs, "Cheaper inference", "Can the gain survive a shorter ViT — or no ViT at all?", "Distillation: YOLOv8n learns to predict DINOv2's P5 features during training only, so inference is plain YOLOv8n. Shorter ViT: fusion with the first k of 12 DINOv2 blocks.")
+    base = f.mean("baseline")
+    depth = f.s.get("depth") or {}
+    candidates = [
+        ("YOLOv8n", "none", ("yolov8n", "baseline", None), base, None),
+        ("YOLOv8n distilled from DINOv2", "none", ("yolov8n", "baseline", None), ((f.s.get("distill") or {}).get("distill") or {}).get("test_map_mean"), f.b("cheap", "distill_vs_baseline")),
+        ("YOLOv8s", "none", ("yolov8s", "baseline", None), ((f.s.get("capacity") or {}).get("baseline") or {}).get("test_map_mean"), f.b("capacity", "yolov8s_vs_yolov8n")),
+        ("LN+GN, 4 of 12 blocks", "4 blocks @518", ("yolov8n", "lngn-d4", 518), ((depth.get("4") or {}).get("lngn") or {}).get("test_map_mean"), f.b("cheap", "d4_vs_baseline")),
+        ("LN+GN, 8 of 12 blocks", "8 blocks @518", ("yolov8n", "lngn-d8", 518), ((depth.get("8") or {}).get("lngn") or {}).get("test_map_mean"), f.b("cheap", "d8_vs_baseline")),
+        ("LN+GN @224, 12 blocks", "12 blocks @224", ("yolov8n", "lngn", 224), next((p["test_map_mean"] for p in f.s.get("cost_curve") or [] if p["label"] == "LN+GN @224"), None), f.b("resolution", "224")),
+        ("LN+GN @518, 12 blocks", "12 blocks @518", ("yolov8n", "lngn", 518), f.mean("lngn"), f.boot.get("lngn")),
+    ]
+    rows = [["Model", "ViT at inference", "GFLOPs", "b1 graph ms", "mAP50-95", "Δ vs YOLOv8n (95% CI)"]]
+    for label, vit, key, score, delta in candidates:
+        b, g = f.bench.get(key), f.fast.get(key)
+        rows.append([
+            label,
+            vit,
+            f"{b['gflops_total']:.1f}" if b else "–",
+            f"{g['graph_ms']:.1f}" if g else "–",
+            pct(score) if score is not None else "pending",
+            "—" if label == "YOLOv8n" else (ci_short(delta) if delta else "pending"),
+        ])
+    hl = [i for i, r in enumerate(rows) if r[0].startswith("YOLOv8n distilled") or r[0].startswith("LN+GN, 4")]
+    table(s, 0.6, 2.1, 12.15, rows, [3.3, 1.9, 1.15, 1.35, 1.35, 3.1], size=11, row_h=0.42, highlight_rows=hl)
+    items = []
+    gain = f.delta("lngn")
+    dist = f.b("cheap", "distill_vs_baseline")
+    if dist and gain:
+        items.append([("Distillation: ", {"bold": True}), (f"{ci_short(dist)} over YOLOv8n at exactly YOLOv8n's cost — {100 * dist['delta_map'] / gain:.0f}% of the fusion gain without running the ViT.", {})])
+    d4 = f.b("cheap", "d4_vs_baseline")
+    b4, b12 = f.bench.get(("yolov8n", "lngn-d4", 518)), f.bench.get(("yolov8n", "lngn", 518))
+    if d4 and gain and b4 and b12:
+        items.append([("Shorter ViT: ", {"bold": True}), (f"4 of 12 blocks keep {100 * d4['delta_map'] / gain:.0f}% of the gain at {100 * b4['gflops_total'] / b12['gflops_total']:.0f}% of the full model's FLOPs.", {})])
+    bullets(s, 0.6, 5.55, 12.15, 1.4, items or ["results pending (Kaggle run)"], size=12, gap=4)
+    notes(s, f"""
+Can we keep the gain without paying for the full ViT? Two ways, both trained the same way as everything else.
+First, distillation: plain YOLOv8n learns to predict DINOv2's features during training only — at test time it is exactly YOLOv8n, same speed. It gains {f.d('cheap', 'distill_vs_baseline')} over the baseline.
+Second, a shorter DINOv2 that runs only the first 4 or 8 of its 12 blocks: {f.d('cheap', 'd4_vs_baseline')} and {f.d('cheap', 'd8_vs_baseline')} over the baseline.
+The table puts every option on the same axes: compute, measured latency, accuracy.
+""")
+
+
 def slide_regimes(prs, f: Facts):
     s = new_slide(prs, "Generalization", "Fewer labels and a far domain")
     picture(s, f.fig("data_regimes"), 0.6, 1.75, 7.4, 4.0)
@@ -933,13 +977,14 @@ def main() -> None:
         (slide_main, 70),
         (slide_mechanism, 50),
         (slide_controls, 60),
-        (slide_curves, 35),
-        (slide_where, 40),
+        (slide_curves, 30),
+        (slide_where, 35),
         (slide_errors, 50),
         (slide_cost, 60),
+        (slide_cheap, 45),
         (slide_regimes, 50),
-        (slide_qualitative, 35),
-        (slide_threats, 40),
+        (slide_qualitative, 25),
+        (slide_threats, 30),
         (slide_conclusion, 50),
     )
     backup = (slide_related, slide_backup)
