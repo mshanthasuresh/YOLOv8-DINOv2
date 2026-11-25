@@ -461,16 +461,21 @@ def slide_experiments(prs, f: Facts):
     norm = "pending"
     if "ci90_map" in (f.boot_nn.get("lngn") or {}):
         norm = "no — LN/GN ≡ no norm (±0.5)" if f.h1_rejected() else "no significant difference"
+    gate, low = f.b("control", "gated_vs_gatedlow"), f.b("control", "gatedlow_vs_nonorm")
+    gating = "pending (Kaggle run)"
+    if gate and low:
+        both = excludes_zero(gate) and excludes_zero(low)
+        gating = f"{'both' if both else 'mixed'}: gate {signed(low['delta_map'])}, larger init {signed(gate['delta_map'])}"
     rows = [
         ["Question", "Experiment (one factor varies)", "Runs", "Answer (Δ mAP50-95, 95% CI)"],
         ["Does fusion help?", "YOLOv8n vs LN+GN fusion, 3 seeds each", n("main", ("baseline", "lngn")), ans(f.boot.get("lngn"))],
         ["H1: does normalization matter?", "No norm / LN / GN / LN+GN / gated adapters", n("main", ("nonorm", "ln", "gn", "lngn", "gated")), norm],
-        ["Is it the spatial layout?", "LN+GN on the image-mean DINO token", n("control", ("global",)), ans(f.b("control", "spatial_vs_global"))],
-        ["Why does gating win?", "Gated arm with the small projector init", n("control", ("gatedlow",)), ans(f.b("control", "gated_vs_gatedlow"))],
+        ["Is it the spatial layout?", "LN+GN on the image-mean DINO token", n("control", ("global",)), ans(f.b("control", "spatial_vs_global"), lambda d: f"yes: layout adds {ci_short(d)}")],
+        ["Why does gating win?", "Gated arm with the small projector init", n("control", ("gatedlow",)), gating],
         ["H3: is it just compute?", "YOLOv8s baseline (3.5× YOLOv8n FLOPs)", n("capacity"), ans(f.b("capacity", "lngn224_vs_yolov8s"), lambda d: f"no: fusion @224 px beats it, {ci_short(d)}")],
         ["How much ViT resolution?", "DINOv2 input 224 / 336 / 448 / 518 px", n("resolution"), res or "pending"],
         ["H4: fewer labels?", "10% of VOC labels, baseline vs LN+GN", n("lowdata"), ans(f.b("lowdata", "lngn"))],
-        ["H4: another domain?", "VisDrone aerial: baseline / no norm / LN+GN", n("visdrone"), ans(f.b("visdrone", "lngn"))],
+        ["H4: another domain?", "VisDrone aerial: baseline / no norm / LN+GN", n("visdrone"), ans(f.b("visdrone", "lngn"), lambda d: f"gain shrinks: {ci_short(d)}")],
         ["Which errors are fixed?", "TIDE-style AP50 error decomposition", "analysis", err],
         ["How is DINO used in training?", "DINO share, feature & gradient ratios / 50 it", "analysis", mech],
     ]
@@ -664,7 +669,7 @@ def slide_regimes(prs, f: Facts):
     if d is not None:
         items.append(f"Reference, VOC 100% labels: {signed(d)}")
     vn = f.b("visdrone_vs_nonorm", "lngn")
-    items.append(f"VisDrone, LN+GN vs no norm: {ci_short(vn)} — " + ("normalization matters here" if excludes_zero(vn) else "normalization again within noise") if vn else "VisDrone, LN+GN vs no norm (H1 on a second domain): pending")
+    items.append(f"VisDrone, LN+GN vs no norm: {signed(vn['delta_map'], 2)} ({ci_text(vn)}) — " + ("normalization matters here" if excludes_zero(vn) else "normalization again within noise") if vn else "VisDrone, LN+GN vs no norm (H1 on a second domain): pending")
     bullets(s, 8.3, 1.9, 4.5, 4.5, items, size=12)
     text(s, 0.6, 5.95, 12.1, 0.9, "No generalization claim is made from VOC alone; VisDrone tests whether frozen natural-image features still help when objects are tiny and viewpoints are aerial.", size=11.5, color=GREY)
     notes(s, "If the 10%-label gain is larger, the story is 'self-supervised features substitute for labels'.")
@@ -703,7 +708,7 @@ def slide_conclusion(prs, f: Facts):
     items = []
     if "ci90_map" in (f.boot_nn.get("lngn") or {}):
         verdict = "rejected. " if f.h1_rejected() else "not supported. "
-        items.append([("H1 normalization — " + verdict, {"bold": True, "color": CORAL}), (f.equivalence_sentence() + ". It changes the injected scale 10×, not the accuracy.", {})])
+        items.append([("H1 normalization — " + verdict, {"bold": True, "color": CORAL}), (f.equivalence_sentence().replace("Normalization: ", "") + ". It changes the injected scale 10×, not the accuracy.", {})])
     boot = f.boot.get("lngn")
     if boot:
         items.append([("H2 fusion — " + ("supported. " if excludes_zero(boot) else "not supported. "), {"bold": True, "color": TEAL}), (f.delta_sentence("lngn"), {})])
