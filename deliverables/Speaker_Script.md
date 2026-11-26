@@ -8,7 +8,7 @@ Generated together with the deck; the same text is in each slide's speaker notes
 
 Good evening. At the midterm you asked me why LayerNorm plus GroupNorm, and I did not have a good answer. So I made that the research question.
 
-I ran 45 controlled training runs to answer it. Short answer: fusion adds +10.5 mAP50-95 points, but the normalization does not explain it — the spatial DINOv2 features do.
+I ran 51 controlled training runs to answer it. Short answer: fusion adds +10.5 mAP50-95 points, but the normalization does not explain it — the spatial DINOv2 features do.
 
 ## 02  /  STARTING POINT
 
@@ -66,7 +66,7 @@ So the testable prediction is: if scale matters, these arms must end at differen
 
 [50 s · finish by 5:20]
 
-This is the depth of the study on one slide: 45 runs, 42 GPU-hours, and each row is a separate controlled question with its own runs.
+This is the depth of the study on one slide: 51 runs, 48 GPU-hours, and each row is a separate controlled question with its own runs.
 
 Each row comes back later in the talk with its own figure and confidence interval.
 
@@ -104,7 +104,7 @@ Second: the gated design differs from no norm in two ways, a learnable gate and 
 
 ## 11  /  TRAINING BUDGET
 
-[35 s · finish by 8:55]
+[30 s · finish by 8:50]
 
 One honest check: is the gain just faster learning? On the validation split the gap between LN+GN and YOLOv8n shrinks from +19.8 points at epoch 1 to +10.7 at epoch 15, and it is still shrinking.
 
@@ -112,7 +112,7 @@ So part of the gain is faster convergence, and a much longer schedule may narrow
 
 ## 12  /  WHERE IT HELPS
 
-[40 s · finish by 9:35]
+[35 s · finish by 9:25]
 
 Where does it help? By object size, AP rises in every bin: small objects from 19.9 to 29.3, large ones from 63.4 to 75.5.
 
@@ -120,7 +120,7 @@ By class, all 20 classes improve. Animals gain the most — bird +19.3, dog +19.
 
 ## 13  /  ERROR ANALYSIS
 
-[50 s · finish by 10:25]
+[50 s · finish by 10:15]
 
 Which errors does it fix? TIDE-style: fix one error type with an oracle and measure the AP50 recovered.
 
@@ -130,7 +130,7 @@ So DINOv2 mainly fixes what an object is, more than where it is. The global-vect
 
 ## 14  /  COST
 
-[60 s · finish by 11:25]
+[60 s · finish by 11:15]
 
 Is it worth the cost? At 518 px the fused model needs 13× YOLOv8n's FLOPs, so the fair question is: why not just use a bigger CNN?
 
@@ -138,11 +138,23 @@ YOLOv8s, trained the same way, gets 61.8. Fusion at 518 beats it by +6.3.
 
 At 224 px fusion needs fewer FLOPs than YOLOv8s and is faster per image in batches — and still wins by +3.0. So H3 holds.
 
-At batch 1 the GPU mostly waits for the CPU to launch kernels, so I replay the whole forward pass as one CUDA graph: same kernels, bit-identical outputs, and LN+GN at 518 drops from 19 to 10 ms, at 224 from 19 to 5 ms.
+At batch 1 the GPU mostly waits for the CPU to launch kernels, so I replay the whole forward pass as one CUDA graph: same kernels, bit-identical outputs, and LN+GN at 518 drops from 34 to 11 ms, at 224 from 34 to 5 ms.
 
-## 15  /  GENERALIZATION
+## 15  /  CHEAPER INFERENCE
 
-[50 s · finish by 12:15]
+[45 s · finish by 12:00]
+
+Can we keep the gain without paying for the full ViT? I tried two ways, trained exactly like everything else, two seeds each.
+
+First, distillation: during training only, YOLOv8n's P5 learns to predict DINOv2's features and ends at cosine 0.69; at test time it is plain YOLOv8n. Result: +0.0 points, so imitating the features does not transfer the benefit.
+
+Second, keep fusion but run only the first 4 or 8 of DINOv2's 12 blocks: -0.1 and +3.8 points, versus +10.5 with all 12.
+
+So the gain lives in the last DINOv2 blocks and has to be computed at test time. That fits the error analysis: what fusion fixes is wrong-class errors, i.e. semantics. If compute matters, shrink the input instead: at 224 px the full ViT still gives +7.0 points for 20 GFLOPs.
+
+## 16  /  GENERALIZATION
+
+[50 s · finish by 12:50]
 
 H4. With only 10% of the labels the gain grows to +15.0: the fused model with 10% labels (57.2) is about as good as the baseline with all labels (57.5).
 
@@ -150,33 +162,33 @@ On VisDrone — aerial images, tiny objects — the gain shrinks to +0.8, as pre
 
 Normalization again makes no difference there.
 
-## 16  /  EXAMPLES
+## 17  /  EXAMPLES
 
-[35 s · finish by 12:50]
+[25 s · finish by 13:15]
 
 Examples, chosen automatically by the largest per-image change between the two models. Fusion improves 1517 images and hurts 782 of 4695.
 
 The right panel shows where it hurts — failures are included on purpose.
 
-## 17  /  VALIDITY
+## 18  /  VALIDITY
 
-[40 s · finish by 13:30]
+[30 s · finish by 13:45]
 
 Finally, the boring explanations I ruled out. Run-to-run noise: three seeds and bootstrap confidence intervals. Choosing on the test set: checkpoints are chosen on validation.
 
-Confounds: one factor per arm, plus two controls. 'Not significant' versus 'the same': an equivalence test with Holm correction. Bugs: 19 unit tests.
+Confounds: one factor per arm, plus two controls. 'Not significant' versus 'the same': an equivalence test with Holm correction. Bugs: 21 unit tests.
 
 Extra compute: the YOLOv8s control. One dataset: VisDrone and the 10%-label regime. What remains: three seeds, one ViT size, and the 15-epoch budget.
 
-## 18  /  CONCLUSIONS
+## 19  /  CONCLUSIONS
 
-[50 s · finish by 14:20]
+[50 s · finish by 14:35]
 
 To conclude. H1 is rejected: normalization changes the injected scale ten-fold, but not the accuracy. H2 holds: +10.5 points.
 
 H3 holds: fusion beats a bigger CNN even at lower compute. H4 holds: a larger gain with fewer labels, a smaller one on tiny aerial objects.
 
-What actually matters is the spatial DINOv2 context; a learnable gate adds a little.
+What actually matters is the spatial DINOv2 context; a learnable gate adds a little. And it has to be computed at test time: distillation gives +0.0 and the first 8 ViT blocks only +3.8.
 
 Main limitation: the 15-epoch budget — the dev gap is still shrinking, so I cannot claim it persists at full convergence. Thank you, I'm happy to take questions.
 

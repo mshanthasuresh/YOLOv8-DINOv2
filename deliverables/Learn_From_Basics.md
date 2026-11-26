@@ -13,14 +13,15 @@
 
 ---
 
-## Part 0: The whole story in 6 sentences
+## Part 0: The whole story in 7 sentences
 
 1. **YOLOv8n** is a small, fast object detector.
 2. **DINOv2** is a large vision model that learned very good image features from 142 million images, *without any labels*.
 3. I **added DINOv2's features into YOLOv8n**. This is called *fusion*.
 4. At the midterm my fusion used two normalization layers (**LayerNorm + GroupNorm**), and the TA asked: *"Why?"*
-5. I tested this properly with **45 training runs**. Fusion improves accuracy a lot (**+10.5 points**), but the normalization layers are **not** the reason.
+5. I tested this properly with **51 training runs**. Fusion improves accuracy a lot (**+10.5 points**), but the normalization layers are **not** the reason.
 6. The real reason is DINOv2's **spatial information**: *what* is *where* in the image. The cost is acceptable, because even a cheap version beats a bigger YOLO.
+7. The gain needs DINOv2's **deep layers at test time**: teaching YOLO to imitate DINOv2 gives nothing, and keeping only 8 of its 12 layers keeps only a third of the gain.
 
 > **Say it:** "Fusion adds 10.5 points. Normalization is not the reason. DINOv2's spatial features are."
 
@@ -182,8 +183,10 @@ image ─┬─► YOLOv8n backbone ──► P5: 256 channels, 20×20 ───
 | **10% labels** | Does it help when labels are few? | **Even more: +15.0** |
 | **VisDrone** | Does it help on drone images with tiny objects? | **Only a little: +0.8** |
 | **Error analysis** | What *kind* of mistakes does it fix? | Wrong labels (−74%) much more than box position (−31%) |
+| **Distillation** | Can YOLO *learn* DINO's knowledge in training, so DINO is not needed at test time? | **No: +0.0**, even though YOLO learns to imitate DINO's features quite well |
+| **Shorter DINOv2** (first 4 or 8 of 12 blocks) | Do we need all of DINO's layers? | **Yes:** 4 blocks give nothing, 8 blocks give +3.8 of the +10.5 |
 
-> **Say it:** "Every claim has its own controlled experiment: 45 runs in total."
+> **Say it:** "Every claim has its own controlled experiment: 51 runs in total."
 
 ---
 
@@ -217,6 +220,12 @@ image ─┬─► YOLOv8n backbone ──► P5: 256 channels, 20×20 ───
 8. **The honest limitation.**
    All runs used **15 epochs** (an *epoch* is one pass over the training data). The gap between the models is still shrinking at epoch 15 (19.8 → 10.7 points). So part of the gain may be "learning faster", and I can't claim the full gap would remain with much longer training.
 
+9. **The gain has to be computed at test time.**
+   - *Distillation:* during training, YOLO learns to imitate DINO's features (similarity 0.69 out of 1), then runs alone at test time. Gain: **+0.0**.
+   - *Shorter DINO:* first 4 blocks: **no gain**; first 8 blocks: **+3.8**; all 12 blocks: **+10.5**.
+   - *Why:* the last DINO blocks hold the *meaning* (what the object is), which is exactly the wrong-class errors that fusion fixes. A small YOLO cannot reproduce that, and early DINO blocks don't contain it yet.
+   - To save compute, shrink DINO's **input** (224 px: +7.0 for 20 GFLOPs) instead of cutting its layers (8 blocks: +3.8 for 71 GFLOPs).
+
 > **Say it:** "What matters is the spatial DINOv2 context. Normalization only changes the starting point. A learnable gate adds a little."
 
 ---
@@ -238,6 +247,10 @@ image ─┬─► YOLOv8n backbone ──► P5: 256 channels, 20×20 ───
 | p-value | How surprising the result would be if there were no real difference |
 | TIDE | A method that splits detection errors into types: wrong class, wrong box, background, missed, duplicate |
 | BatchNorm vs GroupNorm | BatchNorm uses statistics of the whole batch; GroupNorm works per image |
+| Knowledge distillation | Training a small *student* model to copy a big *teacher* model, so that the teacher is not needed later |
+| Cosine similarity | How closely two vectors point in the same direction (1 = same direction, 0 = unrelated); ignores their length |
+| Transformer block | One repeated layer of a ViT; DINOv2 ViT-S/14 stacks 12 of them, each refining the patch tokens |
+| CUDA graph | Recording a whole forward pass once and replaying it as one GPU command, so the CPU stops being the bottleneck |
 
 ---
 
@@ -253,5 +266,7 @@ image ─┬─► YOLOv8n backbone ──► P5: 256 channels, 20×20 ───
 8. **What does the global control show?** Averaging DINO to one vector gives only +3.5, so the spatial layout carries most of the gain.
 9. **Why not just use YOLOv8s?** Fusion at 224 px uses fewer FLOPs than YOLOv8s and is still 3.0 points better.
 10. **What is your main limitation?** Only 15 epochs; the gap is still shrinking, so part of the gain may be faster learning.
+11. **Why not distill DINOv2 into YOLO, so the ViT isn't needed?** I tried. YOLO learned to imitate DINO's features, but accuracy did not improve (+0.0). The benefit needs DINO's deep layers at test time.
+12. **Can DINOv2 be made shorter?** First 4 blocks: no gain; 8 blocks: +3.8; all 12: +10.5. To save compute, use a smaller input (224 px) instead.
 
-If you can answer all ten in your own words, you are ready for the speaker notes.
+If you can answer all twelve in your own words, you are ready for the speaker notes.

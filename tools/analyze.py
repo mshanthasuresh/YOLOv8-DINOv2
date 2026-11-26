@@ -200,6 +200,27 @@ def diagnostics_summary(main: pd.DataFrame) -> tuple[dict, str | None]:
     return summary, path
 
 
+def cheap_mechanism(df: pd.DataFrame) -> dict:
+    """How much the truncated-ViT detectors use DINO (final DINO share) and how well distillation imitates it."""
+    out = {}
+    for d in (4, 8):
+        frames = [x for x in (_load_diag(r) for r in df[(df["group"] == "depth") & (df["dino_depth"] == d)]["run_dir"]) if x is not None and len(x)]
+        if frames:
+            c = pd.concat(frames).groupby("iter").mean(numeric_only=True).reset_index()
+            out[f"d{d}_dino_share"] = float(c.iloc[-max(1, len(c) // 10) :]["L12/dino_share"].mean())  # same window as diagnostics_summary
+    cos = []
+    for run_dir in df[df["group"] == "distill"]["run_dir"]:
+        path = Path(run_dir) / "results.csv"
+        if path.exists():
+            csv = pd.read_csv(path)
+            csv.columns = [c.strip() for c in csv.columns]
+            if "train/dino_loss" in csv:
+                cos.append(1 - float(csv["train/dino_loss"].iloc[-1]))
+    if cos:
+        out["distill_final_cos"] = float(np.mean(cos))
+    return out
+
+
 def fig_dev_curves(main: pd.DataFrame) -> tuple[dict, str | None]:
     fig, ax = plt.subplots(figsize=(6.4, 3.6))
     means = {}
@@ -324,7 +345,7 @@ def resolution_summary(df: pd.DataFrame, bench: dict | None, table: dict) -> tup
     for d in (4, 8):
         add(f"LN+GN, {d} blocks", depth[depth["dino_depth"] == d], ("yolov8n", f"lngn-d{d}", DEFAULT_RES), COLORS["depth"])
     add("Distilled YOLOv8n", voc[voc["group"] == "distill"], ("yolov8n", "baseline", None), COLORS["distill"])
-    plotted = [p for p in points if p["gflops"] is not None]
+    plotted = [p for p in points if p["gflops"] is not None and p["color"] not in (COLORS["depth"], COLORS["distill"])]  # those have their own slide
     if len(plotted) < 2:
         return points, None
     fig, axes = plt.subplots(1, 2, figsize=(9.5, 3.6))
@@ -550,6 +571,7 @@ def main() -> None:
     summary["capacity"] = _arm_table(df[df["group"] == "capacity"])
     summary["distill"] = _arm_table(df[df["group"] == "distill"])
     summary["depth"] = {str(d): _arm_table(df[(df["group"] == "depth") & (df["dino_depth"] == d)]) for d in (4, 8)}
+    summary["cheap_mechanism"] = cheap_mechanism(df)
     summary["control"], summary["figures"]["controls"] = fig_controls(df, table)
     summary["errors"], summary["figures"]["error_types"] = error_summary(df)
     summary["equivalence_margin"] = EQUIV_MARGIN

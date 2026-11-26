@@ -498,12 +498,13 @@ def slide_experiments(prs, f: Facts):
         ["Why does gating win?", "Gated arm with the small projector init", n("control", ("gatedlow",)), gating],
         ["H3: is it just compute?", "YOLOv8s baseline (3.5× YOLOv8n FLOPs)", n("capacity"), ans(f.b("capacity", "lngn224_vs_yolov8s"), lambda d: f"no: fusion @224 px beats it, {ci_short(d)}")],
         ["How much ViT resolution?", "DINOv2 input 224 / 336 / 448 / 518 px", n("resolution"), res or "pending"],
+        ["Can inference be cheaper?", "Distilled YOLOv8n (no ViT); fusion with 4 / 8 of 12 ViT blocks", sum(r.get("group") in ("distill", "depth") for r in runs) or "queued", f"distilled {f.d('cheap', 'distill_vs_baseline')}, 4 blocks {f.d('cheap', 'd4_vs_baseline')}, 8 blocks {f.d('cheap', 'd8_vs_baseline')}" if f.b("cheap", "d8_vs_baseline") else "pending (Kaggle run)"],
         ["H4: fewer labels?", "10% of VOC labels, baseline vs LN+GN", n("lowdata"), ans(f.b("lowdata", "lngn"))],
         ["H4: another domain?", "VisDrone aerial: baseline / no norm / LN+GN", n("visdrone"), ans(f.b("visdrone", "lngn"), lambda d: f"gain shrinks: {ci_short(d)}")],
         ["Which errors are fixed?", "TIDE-style AP50 error decomposition", "analysis", err],
         ["How is DINO used in training?", "DINO share, feature & gradient ratios / 50 it", "analysis", mech],
     ]
-    table(s, 0.6, 2.0, 12.15, rows, [2.75, 4.5, 0.8, 4.1], size=10.5, row_h=0.43)
+    table(s, 0.6, 2.0, 12.15, rows, [2.75, 4.5, 0.8, 4.1], size=10.5, row_h=0.4)
     notes(s, f"""
 This is the depth of the study on one slide: {len(runs)} runs, {hours:.0f} GPU-hours, and each row is a separate controlled question with its own runs.
 Each row comes back later in the talk with its own figure and confidence interval.
@@ -761,23 +762,53 @@ def slide_cheap(prs, f: Facts):
             pct(score) if score is not None else "pending",
             "—" if label == "YOLOv8n" else (ci_short(delta) if delta else "pending"),
         ])
-    hl = [i for i, r in enumerate(rows) if r[0].startswith("YOLOv8n distilled") or r[0].startswith("LN+GN, 4")]
+    hl = [i for i, r in enumerate(rows) if r[0].startswith(("YOLOv8n distilled", "LN+GN, "))]  # this slide's new runs
     table(s, 0.6, 2.1, 12.15, rows, [3.3, 1.9, 1.15, 1.35, 1.35, 3.1], size=11, row_h=0.42, highlight_rows=hl)
     items = []
     gain = f.delta("lngn")
+    mech = f.s.get("cheap_mechanism") or {}
+    cos, share4 = mech.get("distill_final_cos"), mech.get("d4_dino_share")
     dist = f.b("cheap", "distill_vs_baseline")
+    dist_works = bool(dist) and excludes_zero(dist) and dist["delta_map"] > 0
+
+    def same_as_v8n(d):  # equivalence test, as for the normalization arms
+        lo, hi = d.get("ci90_map") or (-1, 1)
+        return -f.margin < lo and hi < f.margin
+
     if dist and gain:
-        items.append([("Distillation: ", {"bold": True}), (f"{ci_short(dist)} over YOLOv8n at exactly YOLOv8n's cost — {100 * dist['delta_map'] / gain:.0f}% of the fusion gain without running the ViT.", {})])
-    d4 = f.b("cheap", "d4_vs_baseline")
-    b4, b12 = f.bench.get(("yolov8n", "lngn-d4", 518)), f.bench.get(("yolov8n", "lngn", 518))
-    if d4 and gain and b4 and b12:
-        items.append([("Shorter ViT: ", {"bold": True}), (f"4 of 12 blocks keep {100 * d4['delta_map'] / gain:.0f}% of the gain at {100 * b4['gflops_total'] / b12['gflops_total']:.0f}% of the full model's FLOPs.", {})])
-    bullets(s, 0.6, 5.55, 12.15, 1.4, items or ["results pending (Kaggle run)"], size=12, gap=4)
+        imitated = f", although its P5 learns to imitate DINOv2 (cosine {cos:.2f})" if cos is not None else ""
+        verdict_d = f"equivalent to plain YOLOv8n (90% CI inside \u00b1{100 * f.margin:.1f}){imitated}." if same_as_v8n(dist) else f"no reliable gain{imitated}."
+        tail = f"{100 * dist['delta_map'] / gain:.0f}% of the fusion gain at YOLOv8n's exact cost." if dist_works else verdict_d
+        items.append([("Distillation: ", {"bold": True}), (f"{ci_short(dist)} \u2014 {tail}", {})])
+    d4, d8 = f.b("cheap", "d4_vs_baseline"), f.b("cheap", "d8_vs_baseline")
+    b4, b8, b12 = (f.bench.get(("yolov8n", arm, 518)) for arm in ("lngn-d4", "lngn-d8", "lngn"))
+    if d4 and d8 and gain and b8 and b12:
+        d4_works = excludes_zero(d4) and d4["delta_map"] > 0
+        used = f" despite a {share4:.2f} DINO share" if share4 is not None and not d4_works else ""
+        d4_text = f"4 blocks {ci_short(d4)}" + ("" if d4_works else f", {'equivalent to YOLOv8n' if same_as_v8n(d4) else 'no gain'}{used}")
+        items.append([("Shorter ViT: ", {"bold": True}), (f"{d4_text}; 8 blocks {ci_short(d8)}, {100 * d8['delta_map'] / gain:.0f}% of the gain for {100 * b8['gflops_total'] / b12['gflops_total']:.0f}% of the FLOPs.", {})])
+    r224, b224 = f.b("resolution", "224"), f.bench.get(("yolov8n", "lngn", 224))
+    options = [(k, d, b) for k, d, b in (("4 blocks", d4, b4), ("8 blocks", d8, b8)) if d and b]
+    verdict = None
+    if options and r224 and b224:
+        k, dk, bk = max(options, key=lambda o: o[1]["delta_map"])
+        if r224["delta_map"] >= dk["delta_map"] and b224["gflops_total"] <= bk["gflops_total"]:
+            verdict = "a smaller DINOv2 input beats a shallower DINOv2."
+        elif dk["delta_map"] >= r224["delta_map"] and bk["gflops_total"] <= b224["gflops_total"]:
+            verdict = "a shallower DINOv2 beats a smaller DINOv2 input."
+        else:
+            verdict = "a trade-off; neither knob dominates."
+        items.append([("Which knob? ", {"bold": True}), (f"{k} @518 px: {signed(dk['delta_map'])} at {bk['gflops_total']:.0f} GFLOPs; all 12 blocks @224 px: {signed(r224['delta_map'])} at {b224['gflops_total']:.0f} GFLOPs \u2192 {verdict}", {})])
+    bullets(s, 0.6, 5.55, 12.15, 1.4, items or ["results pending (Kaggle run)"], size=11.5, gap=4)
+    deep = bool(d4 and d8 and gain) and not dist_works and d8["delta_map"] < 0.5 * gain
+    shrink = ""
+    if verdict and verdict.startswith("a smaller"):
+        shrink = f"If compute matters, shrink the input instead: at 224 px the full ViT still gives {f.d('resolution', '224')} points for {b224['gflops_total']:.0f} GFLOPs."
     notes(s, f"""
-Can we keep the gain without paying for the full ViT? Two ways, both trained the same way as everything else.
-First, distillation: plain YOLOv8n learns to predict DINOv2's features during training only — at test time it is exactly YOLOv8n, same speed. It gains {f.d('cheap', 'distill_vs_baseline')} over the baseline.
-Second, a shorter DINOv2 that runs only the first 4 or 8 of its 12 blocks: {f.d('cheap', 'd4_vs_baseline')} and {f.d('cheap', 'd8_vs_baseline')} over the baseline.
-The table puts every option on the same axes: compute, measured latency, accuracy.
+Can we keep the gain without paying for the full ViT? I tried two ways, trained exactly like everything else, two seeds each.
+First, distillation: during training only, YOLOv8n's P5 learns to predict DINOv2's features{f' and ends at cosine {cos:.2f}' if cos is not None else ''}; at test time it is plain YOLOv8n. Result: {f.d('cheap', 'distill_vs_baseline')} points{'' if dist_works else ', so imitating the features does not transfer the benefit'}.
+Second, keep fusion but run only the first 4 or 8 of DINOv2's 12 blocks: {f.d('cheap', 'd4_vs_baseline')} and {f.d('cheap', 'd8_vs_baseline')} points, versus {f.d('main', 'lngn')} with all 12.
+{'So the gain lives in the last DINOv2 blocks and has to be computed at test time. That fits the error analysis: what fusion fixes is wrong-class errors, i.e. semantics. ' if deep else ''}{shrink}
 """)
 
 
@@ -832,15 +863,15 @@ def slide_threats(prs, f: Facts):
         ["Selecting on the test set", "Checkpoint picked on VOC07 val; test scored once per run", "—"],
         ["Confounded changes", "One factor per arm; controls for spatial layout and for the gate's init", "Adapter width (64) and α not varied"],
         ["'Not significant' ≠ 'no effect'", "Equivalence test (90% CI inside ±0.5 points); Holm over the 4 normalization comparisons", "The ±0.5 margin is a judgment call"],
-        ["Implementation bugs", "19 unit tests (zero-init equality, channel offsets, resume, error types, CUDA-graph equality); bootstrap AP equals Ultralytics exactly", "—"],
-        ["Gain bought with compute", "YOLOv8s control; DINOv2 resolution sweep; FLOPs and batched latency", "Latency on one GPU type"],
+        ["Implementation bugs", "21 unit tests (zero-init equality, channel offsets, resume, error types, CUDA-graph equality, truncated ViT, distillation); bootstrap AP equals Ultralytics exactly", "—"],
+        ["Gain bought with compute", "YOLOv8s control; DINOv2 resolution and depth sweeps; distillation; FLOPs, batched and CUDA-graph latency", "Latency on one GPU type"],
         ["One dataset", "10%-label regime; VisDrone aerial domain", "Two datasets, one ViT size"],
         ["Short schedule", "Same 15 epochs for every arm; dev curves inspected", "Longer training may narrow the gap"],
     ]
     table(s, 0.6, 1.8, 12.15, rows, [2.75, 5.7, 3.7], size=11, row_h=0.52)
     notes(s, """
 Finally, the boring explanations I ruled out. Run-to-run noise: three seeds and bootstrap confidence intervals. Choosing on the test set: checkpoints are chosen on validation.
-Confounds: one factor per arm, plus two controls. 'Not significant' versus 'the same': an equivalence test with Holm correction. Bugs: 19 unit tests.
+Confounds: one factor per arm, plus two controls. 'Not significant' versus 'the same': an equivalence test with Holm correction. Bugs: 21 unit tests.
 Extra compute: the YOLOv8s control. One dataset: VisDrone and the 10%-label regime. What remains: three seeds, one ViT size, and the 15-epoch budget.
 """)
 
@@ -874,6 +905,9 @@ def slide_conclusion(prs, f: Facts):
     g = f.boot_nn.get("gated")
     if g and excludes_zero(g):
         items.append([("Extra — ", {"bold": True}), (f"the learnable per-channel gate is the only adapter change beyond noise ({signed(g['delta_map'], 2)} vs no norm).", {})])
+    dist, d4, d8 = (f.b("cheap", k) for k in ("distill_vs_baseline", "d4_vs_baseline", "d8_vs_baseline"))
+    if dist and d4 and d8:
+        items.append([("Cheaper inference — ", {"bold": True}), (f"distilled YOLOv8n {ci_short(dist)}; fusion with 4 of 12 ViT blocks {ci_short(d4)}, with 8 blocks {ci_short(d8)}.", {})])
     bullets(s, 0.6, 1.8, 7.6, 4.9, items, size=12.5, gap=10)
     label_box(
         s, 8.5, 1.8, 4.25, 4.95, "Limitations",
@@ -889,7 +923,7 @@ def slide_conclusion(prs, f: Facts):
     notes(s, f"""
 To conclude. H1 is rejected: normalization changes the injected scale ten-fold, but not the accuracy. H2 holds: {f.d('main', 'lngn')} points.
 H3 holds: fusion beats a bigger CNN even at lower compute. H4 holds: a larger gain with fewer labels, a smaller one on tiny aerial objects.
-What actually matters is the spatial DINOv2 context; a learnable gate adds a little.
+What actually matters is the spatial DINOv2 context; a learnable gate adds a little.{' And it has to be computed at test time: distillation gives ' + f.d('cheap', 'distill_vs_baseline') + ' and the first 8 ViT blocks only ' + f.d('cheap', 'd8_vs_baseline') + '.' if f.b('cheap', 'd8_vs_baseline') else ''}
 Main limitation: the 15-epoch budget — the dev gap is still shrinking, so I cannot claim it persists at full convergence. Thank you, I'm happy to take questions.
 """)
 
@@ -899,7 +933,7 @@ def slide_backup(prs, f: Facts):
     rows = [
         ["Command", "What it does"],
         ["python -m tools.prepare_data", "VOC download + fixed splits"],
-        ["python -m pytest tests", "19 tests: offsets, zero-init equality, pickling, resume, gradients, error types, CUDA graphs"],
+        ["python -m pytest tests", "21 tests: offsets, zero-init equality, pickling, resume, gradients, error types, CUDA graphs, truncated ViT, distillation"],
         ["python -m tools.bench --fast", "batch-1 latency, eager vs CUDA graph"],
         ["python -m tools.run_queue", "every run, resumable (laptop)"],
         ["tools.kaggle_worker", "same runs on Kaggle GPUs, one per GPU"],
@@ -917,6 +951,7 @@ def slide_backup(prs, f: Facts):
             "• Did copied filters read the right channels? → 'Method', unit test",
             "• What does DINOv2 actually fix? → 'Error analysis', 'Controls'",
             "• Beyond VOC? → 'Generalization'",
+            "• Can inference be cheaper? → 'Cheaper inference'",
         ],
         body_size=12,
     )

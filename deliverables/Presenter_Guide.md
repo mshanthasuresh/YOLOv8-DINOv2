@@ -1,62 +1,65 @@
 # Final presentation: rehearsal guide (Friday)
 
 **Graded on:** depth of experimentation and quality of analysis.
-**Plan for:** a 15-minute talk. The script runs 14:20, leaving about 40 seconds of slack.
+**Plan for:** a 15-minute talk. The script runs 14:35, leaving about 25 seconds of slack.
 **Ask the coordinator beforehand:** are questions inside the 15 minutes? If yes, use the 12-minute cut in section 2.
-**Deck:** 18 talk slides, then 2 backup slides (B1–B2) that you show only if someone asks.
+**Deck:** 19 talk slides, then 2 backup slides (B1–B2) that you show only if someone asks.
 **Speaker notes:** every slide's notes start with its time budget and the clock time to finish by, for example *[45 s · finish by 1:10]*. In PowerPoint use Slide Show, then *Use Presenter View*.
 
 ---
 
 ## 1. The 30-second answer (memorize this)
 
-> At the midterm I was asked why LayerNorm plus GroupNorm, and I couldn't answer. So I made it the research question and ran 45 controlled runs.
+> At the midterm I was asked why LayerNorm plus GroupNorm, and I couldn't answer. So I made it the research question and ran 51 controlled runs.
 >
 > Fusing frozen DINOv2 into YOLOv8n adds **+10.5 mAP50-95** on held-out VOC07 test. The normalization does **not** explain it: LN, GN and LN+GN are statistically equivalent to no normalization.
 >
 > What matters is the **spatial** DINOv2 context, which gives two-thirds of the gain. It mainly fixes **wrong-class** errors. It beats a bigger CNN (YOLOv8s) even at **lower compute**. The gain grows to **+15** with 10% of the labels and shrinks to **+0.8** on tiny aerial objects.
+>
+> And DINOv2 has to run at test time: distilling it into YOLO gives **+0.0**, and its first 8 of 12 blocks keep only a third of the gain.
 
 ---
 
-## 2. Talk plan: 18 slides in about 14 minutes
+## 2. Talk plan: 19 slides in about 14.5 minutes
 
 | # | Slide | Time | Finish by | The one message |
 |---|---|---|---|---|
-| 1 | Title | 0:25 | 0:25 | You asked "why LN+GN"; here is the answer, backed by 45 runs. |
+| 1 | Title | 0:25 | 0:25 | You asked "why LN+GN"; here is the answer, backed by 51 runs. |
 | 2 | Starting point | 0:45 | 1:10 | The midterm jump changed five things at once, plus a weight-transfer bug. It was a hypothesis, not a result. |
 | 3 | Research question | 0:40 | 1:50 | Four hypotheses, each with a stated way to fail. |
 | 4 | Method | 1:05 | 2:55 | One factor per arm. Channel-correct transfer and zero-init mean every arm starts as exactly the baseline. |
 | 5 | Protocol | 0:45 | 3:40 | Same data and schedule for every arm. Checkpoint chosen on validation, test scored once. mAP50-95, 3 seeds, bootstrap CIs. |
 | 6 | Why normalization could matter | 0:50 | 4:30 | The intuition: an 8× scale gap and a 10× spread at init. Prediction: if scale matters, accuracies differ. |
-| 7 | Experiment map | 0:50 | 5:20 | Depth: 45 runs, 42 GPU-hours, every row a controlled question. |
+| 7 | Experiment map | 0:50 | 5:20 | Depth: 51 runs, 48 GPU-hours, every row a controlled question. |
 | 8 | Main result | 1:10 | 6:30 | +10.5 [9.8, 11.2]. Normalization arms are equivalent within ±0.5. Only gating differs (+0.73). |
 | 9 | Mechanism | 0:50 | 7:20 | Reliance on DINO differs 1.9× across arms, accuracy by 0.26: the network rescales the context itself. |
 | 10 | Controls | 1:00 | 8:20 | Spatial layout gives two-thirds of the gain. Gate and init each add about 0.3–0.4. |
-| 11 | Training budget | 0:35 | 8:55 | The gap shrinks from 19.8 to 10.7 over 15 epochs: part of the gain is faster learning. Say this honestly. |
-| 12 | Where it helps | 0:40 | 9:35 | Every object size and all 20 classes improve; animals most, person and car least. |
-| 13 | Error analysis | 0:50 | 10:25 | It fixes what an object is (wrong class −74%) more than where it is (boxes −31%). |
-| 14 | Cost | 1:00 | 11:25 | It beats YOLOv8s by +6.3. At 224 px it uses fewer FLOPs than YOLOv8s and still wins by +3.0. |
-| 15 | Generalization | 0:50 | 12:15 | +15.0 with 10% of labels; +0.8 on VisDrone; normalization irrelevant on both. |
-| 16 | Examples | 0:35 | 12:50 | Where it helps and where it hurts; failures are shown on purpose. |
-| 17 | Threats to validity | 0:40 | 13:30 | Every boring explanation and the experiment that rules it out. |
-| 18 | Conclusions | 0:50 | 14:20 | Verdicts: H1 rejected, H2–H4 supported. Limitation: the 15-epoch budget. |
+| 11 | Training budget | 0:30 | 8:50 | The gap shrinks from 19.8 to 10.7 over 15 epochs: part of the gain is faster learning. Say this honestly. |
+| 12 | Where it helps | 0:35 | 9:25 | Every object size and all 20 classes improve; animals most, person and car least. |
+| 13 | Error analysis | 0:50 | 10:15 | It fixes what an object is (wrong class −74%) more than where it is (boxes −31%). |
+| 14 | Cost | 1:00 | 11:15 | It beats YOLOv8s by +6.3. At 224 px it uses fewer FLOPs than YOLOv8s and still wins by +3.0. |
+| 15 | Cheaper inference | 0:45 | 12:00 | Distilled YOLOv8n +0.0 and 4 ViT blocks −0.1 (both equivalent to YOLOv8n); 8 blocks +3.8. The gain lives in DINOv2's last blocks; a 224-px input is the better saving. |
+| 16 | Generalization | 0:50 | 12:50 | +15.0 with 10% of labels; +0.8 on VisDrone; normalization irrelevant on both. |
+| 17 | Examples | 0:25 | 13:15 | Where it helps and where it hurts; failures are shown on purpose. |
+| 18 | Threats to validity | 0:30 | 13:45 | Every boring explanation and the experiment that rules it out. |
+| 19 | Conclusions | 0:50 | 14:35 | Verdicts: H1 rejected, H2–H4 supported. Limitation: the 15-epoch budget. |
 
 **Checkpoints during the talk:**
 - Main result (slide 8) should start at about **5:20**.
-- Cost (slide 14) should start at about **10:25**.
-- If you are more than 30 seconds behind, shorten Examples (16) and Threats (17) to one sentence each.
+- Cost (slide 14) should start at about **10:15**.
+- If you are more than 30 seconds behind, shorten Examples (17) and Threats (18) to one sentence each.
 
 **If questions are inside the 15 minutes (a 12-minute talk):**
 1. Skip Protocol (5) and say its key sentence on the Experiment map instead: "checkpoint chosen on validation, test scored once, three seeds".
-2. Skip Where it helps (12).
-3. Skip Threats (17).
+2. Skip Where it helps (12) and Examples (17).
+3. Skip Threats (18).
 4. Cut Training budget (11) to one sentence in the Conclusions.
 
-That saves about 2:40, so the talk ends near 11:40.
+That saves about 2:40, so the talk ends near 11:55.
 
 **Backup slides** (the slide number to type during the show is in brackets):
-- B1 Related work [19]
-- B2 Reproducibility and likely questions [20]
+- B1 Related work [20]
+- B2 Reproducibility and likely questions [21]
 
 Jump to one only when a question needs it.
 
@@ -77,18 +80,22 @@ Jump to one only when a question needs it.
 | Error analysis: AP50 lost (baseline → LN+GN) | wrong class 2.03 → 0.52 (−74%); missed 0.45 → 0.14 (−69%); poor box 2.19 → 1.52 (−31%); background 4.40 → 3.48 (−21%) |
 | Errors at conf ≥ 0.25 | wrong-class detections 626 → 277; missed objects 2,240 → 1,203 of 12,032 |
 | YOLOv8s | **61.8**; fusion @518 is +6.3 [5.6, 6.9]; fusion @224 is **+3.0** [2.3, 3.5] |
-| Cost: YOLOv8n | 8.1 GFLOPs, 1.65 ms/img |
-| Cost: YOLOv8s | 28.5 GFLOPs, 3.69 ms/img |
-| Cost: fusion @224 | 20.4 GFLOPs, 3.20 ms/img |
-| Cost: fusion @518 | 101.6 GFLOPs, 9.65 ms/img |
-| Batch-1 latency, normal → CUDA graph (same outputs) | fusion @518: 19.3 → 9.9 ms; fusion @224: 19.5 → 5.0 ms; YOLOv8s: 7.9 → 3.5 ms; YOLOv8n: 8.0 → 1.9 ms |
+| Cost: YOLOv8n | 8.1 GFLOPs, 1.56 ms/img |
+| Cost: YOLOv8s | 28.5 GFLOPs, 3.07 ms/img |
+| Cost: fusion @224 | 20.4 GFLOPs, 2.68 ms/img |
+| Cost: fusion @518 | 101.6 GFLOPs, 8.06 ms/img |
+| Batch-1 latency, normal → CUDA graph (same outputs) | fusion @518: 34.4 → 11.3 ms; fusion @224: 34.3 → 5.3 ms; YOLOv8s: 15.1 → 3.9 ms; YOLOv8n: 14.0 → 2.0 ms. Normal batch-1 times swing with CPU load; graph times repeat within ~3% |
 | DINOv2 resolution | 224: 64.6; 336: 66.7; 448: 67.9; 518: 68.0 |
+| Distilled YOLOv8n (no ViT at test time) | 57.6, Δ **+0.0** [−0.3, +0.4]; 90% CI inside ±0.5, so equivalent to YOLOv8n. Its P5 imitates DINOv2 at cosine 0.69 |
+| Fewer DINOv2 blocks (fusion @518) | 4 of 12: 57.4, Δ −0.1 [−0.5, +0.2], 39.8 GFLOPs; 8 of 12: 61.3, Δ **+3.8** [3.3, 4.2], 70.7 GFLOPs; the last 4 blocks add +6.6 [6.0, 7.2] |
+| DINO share with 4 / 8 / 12 blocks | 0.18 / 0.32 / 0.32: the 8-block model listens to DINO as much as the full one, but gets only a third of the gain |
+| CUDA-graph latency, cheap options | YOLOv8n 2.0 ms; YOLOv8s 3.9; fusion @224 5.3; 4 blocks 5.6; 8 blocks 8.7; full 11.3 |
 | 10% labels | 42.2 → 57.2, **+15.0** [14.3, 15.7]; fusion with 10% labels ≈ baseline with 100% (57.5) |
 | VisDrone | 12.5 → 13.2, **+0.8** [0.6, 0.9]; LN+GN vs no norm +0.04 [−0.06, +0.15] |
 | Object size (AP) | small 19.9 → 29.3; medium 40.4 → 48.8; large 63.4 → 75.5 |
 | Per class | every class improves; most: bird +19.3, dog +19.2, cat +14.9; least: car +4.0, person +5.6 |
 | Dev gap (training dynamics) | 19.8 at epoch 1 → 13.3 at epoch 10 → 10.7 at epoch 15, still shrinking |
-| Scale of the study | 45 runs, 42 GPU-hours, 19 unit tests |
+| Scale of the study | 51 runs, 48 GPU-hours, 21 unit tests |
 
 ---
 
@@ -111,7 +118,7 @@ Keep every answer under 30 seconds: say the claim, then the number, then stop.
    I split the first neck convolution into its DINO part and its YOLO part. The share is RMS(DINO response) / (RMS(DINO) + RMS(YOLO)). It starts at exactly 0 because of zero-init, and I logged it every 50 iterations.
 
 5. **"How do you know the copied weights are right?"**
-   There is a unit test: with the DINO columns zeroed, the fused model's output equals the baseline exactly (max difference 0) for every arm. In total, 19 tests cover offsets, pickling, resume, gradient flow, the error analysis and CUDA-graph equality.
+   There is a unit test: with the DINO columns zeroed, the fused model's output equals the baseline exactly (max difference 0) for every arm. In total, 21 tests cover offsets, pickling, resume, gradient flow, the error analysis, CUDA-graph equality, the truncated ViT and distillation.
 
 **Statistics**
 
@@ -144,40 +151,48 @@ Keep every answer under 30 seconds: say the claim, then the number, then stop.
 **Cost and fairness**
 
 14. **"Isn't it just a bigger model?"**
-    I controlled for that. YOLOv8s has 3.5× YOLOv8n's FLOPs and gets 61.8. Fusion at 224 px uses fewer FLOPs than YOLOv8s (20 vs 28) and less batched time (3.2 vs 3.7 ms), and is still +3.0 better.
+    I controlled for that. YOLOv8s has 3.5× YOLOv8n's FLOPs and gets 61.8. Fusion at 224 px uses fewer FLOPs than YOLOv8s (20 vs 28) and less batched time (2.7 vs 3.1 ms), and is still +3.0 better.
 
 15. **"Was the YOLOv8s comparison fair?"**
     Yes: same data, 15-epoch schedule, optimizer, COCO initialization, checkpoint selection on dev, and 3 seeds.
 
 16. **"Batch-1 latency is worse. Isn't that a problem? Can you make inference faster?"**
-    At batch 1 on this laptop GPU, the GPU mostly waits for the CPU to launch hundreds of small kernels. That's why normal latency is about 19 ms whether DINOv2 runs at 224 or 518 px.
+    At batch 1 on this laptop GPU, the GPU mostly waits for the CPU to launch hundreds of small kernels. That's why normal latency is about the same (about 34 ms) whether DINOv2 runs at 224 or 518 px, and why it moves with CPU load: YOLOv8n measured anywhere from 8 to 21 ms in different sessions.
 
-    I capture the whole forward pass once and replay it as a single **CUDA graph**. It runs the same kernels and produces bit-identical outputs; I checked this on 200 real test images and with a unit test.
+    I capture the whole forward pass once and replay it as a single **CUDA graph**. It runs the same kernels and produces bit-identical outputs; I checked this on 200 real test images and with a unit test. Graph timings repeat within about 3% across sessions.
 
     | Model | Normal | CUDA graph |
     |---|---|---|
-    | Fusion @518 | 19.3 ms | **9.9 ms** |
-    | Fusion @224 | 19.5 ms | **5.0 ms** |
-    | YOLOv8s | 7.9 ms | 3.5 ms |
+    | Fusion @518 | 34.4 ms | **11.3 ms** |
+    | Fusion @224 | 34.3 ms | **5.3 ms** |
+    | Fusion, 4 of 12 ViT blocks @518 | 23.2 ms | 5.6 ms |
+    | YOLOv8s | 15.1 ms | 3.9 ms |
+    | YOLOv8n | 14.0 ms | 2.0 ms |
 
-    Accuracy doesn't change at all. Further speed-ups would need TensorRT, fewer ViT blocks, or distilling DINOv2 into YOLO, which is future work.
+    Accuracy doesn't change at all. I also tested two training-based shortcuts, distillation and fewer ViT blocks (next two questions).
 
-17. **"Did you tune hyperparameters per arm?"**
+17. **"Can you get the gain without running DINOv2 at test time?"** (Slide 15.)
+    I tried knowledge distillation. During training only, a 1×1 layer on YOLO's P5 map has to predict DINOv2's patch features (cosine loss). It is thrown away afterwards, so inference is exactly YOLOv8n. YOLO does learn to imitate the features (cosine 0.69 at the end), but accuracy doesn't move: +0.0 [−0.3, +0.4], statistically equivalent to plain YOLOv8n. So the benefit is not a better training signal; DINOv2's features are needed at test time. A 3-million-parameter CNN can't recompute what a 22-million-parameter ViT computes.
+
+18. **"Why not run fewer ViT blocks?"** (Slide 15.)
+    I tried the first 4 and the first 8 of DINOv2's 12 blocks at 518 px. Four blocks: −0.1, equivalent to no fusion, even though the neck still gives them a 0.18 DINO share. Eight blocks: +3.8, a third of the gain for 70% of the FLOPs, and still below YOLOv8s. So the gain lives in the last blocks, which carry semantics; that matches the error analysis, where fusion mainly fixes wrong-class errors. The better saving is a smaller input: all 12 blocks at 224 px give +7.0 for 20 GFLOPs.
+
+19. **"Did you tune hyperparameters per arm?"**
     No. Every arm uses identical settings, which avoids tuning bias. The risk is that some arm would prefer a different learning rate; that is a stated limitation.
 
 **Generalization**
 
-18. **"Why is the VisDrone gain so small?"**
+20. **"Why is the VisDrone gain so small?"**
     The objects are tiny and the images are 1,360–2,000 px wide. After resizing, each DINO patch covers a large region, and the context enters at stride 32. DINOv2 was also trained on ground-level photos, not aerial views. It still helps (+0.8, CI excludes 0), and normalization again makes no difference.
 
-19. **"Could DINOv2 have seen VOC test images in pretraining?"**
+21. **"Could DINOv2 have seen VOC test images in pretraining?"**
     DINOv2's authors removed near-duplicates of their evaluation benchmarks from the pretraining data, but I can't fully rule out overlap with VOC07 test. DINOv2 never saw labels, and the same pattern holds with 10% of the labels and on VisDrone.
 
-20. **"What would you do next?"**
+22. **"What would you do next?"**
     - Train to convergence, to settle the convergence question.
     - Inject at P3/P4 for small objects.
     - Try ViT-B with registers.
-    - Distill DINOv2 into YOLO to remove the inference cost.
+    - Distill into a larger student or at several scales with a longer schedule, since plain P5 feature distillation did not transfer the gain.
 
 **If you don't know an answer:**
 > "I didn't test that directly. My closest evidence is ___. I would test it by ___."
@@ -202,6 +217,6 @@ That is better than guessing; it shows analytical thinking.
 | When | What |
 |---|---|
 | Wednesday evening | Read the speaker notes aloud twice with a timer. Mark the slides where you run over. |
-| Thursday | Three timed full runs; target 14:00–14:30. Record one on your phone and watch it once. Say answers 1, 6, 7, 10, 11 and 14 aloud until each takes under 30 seconds. |
+| Thursday | Three timed full runs; target 14:15–14:45. Record one on your phone and watch it once. Say answers 1, 6, 7, 10, 11, 14 and 17 aloud until each takes under 30 seconds. |
 | Thursday night | Mock Q&A with me: reply **"mock Q&A"** and I'll ask TA-style questions one at a time and critique your answers. |
 | Friday morning | One final run. Check screen sharing with Presenter View. Open the deck file in advance. Know how to jump to backup slides (type the slide number, then press Enter). |
